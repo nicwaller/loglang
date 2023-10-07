@@ -6,9 +6,10 @@ import "loglang/loglang"
 func Replace(name, field string, content string) loglang.FilterPlugin {
 	return loglang.FilterPlugin{
 		Name: name,
-		Run: func(event loglang.Event) (loglang.Event, error) {
-			event.OrderedFields[field] = content
-			return event, nil
+		Run: func(event loglang.Event, send chan<- loglang.Event) error {
+			event.Field(field).SetString(content)
+			send <- event
+			return nil
 		},
 	}
 }
@@ -16,9 +17,10 @@ func Replace(name, field string, content string) loglang.FilterPlugin {
 func Remove(name string, field string) loglang.FilterPlugin {
 	return loglang.FilterPlugin{
 		Name: name,
-		Run: func(event loglang.Event) (loglang.Event, error) {
-			delete(event.OrderedFields, field)
-			return event, nil
+		Run: func(event loglang.Event, send chan<- loglang.Event) error {
+			event.Field(field).Delete()
+			send <- event
+			return nil
 		},
 	}
 }
@@ -26,10 +28,13 @@ func Remove(name string, field string) loglang.FilterPlugin {
 func Rename(name string, oldField string, newField string) loglang.FilterPlugin {
 	return loglang.FilterPlugin{
 		Name: name,
-		Run: func(event loglang.Event) (loglang.Event, error) {
-			event.OrderedFields[newField] = event.OrderedFields[oldField]
-			delete(event.OrderedFields, oldField)
-			return event, nil
+		Run: func(event loglang.Event, send chan<- loglang.Event) error {
+			oldF := event.Field(oldField)
+			newF := event.Field(newField)
+			newF.Set(oldF.MustGet())
+			oldF.Delete()
+			send <- event
+			return nil
 		},
 	}
 }

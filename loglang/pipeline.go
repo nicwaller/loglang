@@ -9,7 +9,16 @@ import (
 
 func NewPipeline() Pipeline {
 	var p Pipeline
-	p.filters = make([]FilterPlugin, 0)
+	p.filters = []FilterPlugin{
+		{
+			Name: "populate @timestamp",
+			Run: func(event Event, send chan<- Event) error {
+				event.Field("@timestamp").Set(time.Now().Format(time.RFC3339))
+				send <- event
+				return nil
+			},
+		},
+	}
 	return p
 }
 
@@ -20,40 +29,43 @@ type Pipeline struct {
 // TODO: Inputs and Outputs should have codecs for converting between original and []byte
 
 func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
-	const InBufferSize = 2
-	const OutBufferSize = 2
+	const ChanBufferSize = 2
 
 	// all inputs are multiplexed to a single input channel
-	inChan := make(chan Event, InBufferSize)
+	inChan := make(chan Event, ChanBufferSize)
 	// a single output channel does fan-out to all outputs
-	outChan := make(chan Event, OutBufferSize)
+	outChan := make(chan Event, ChanBufferSize)
 
 	// set up filters first, then outputs, then inputs LAST!
 
-	// goroutines to run filters
+	slog.Debug("setting up filter channels")
+	filterChannels := make([]chan Event, 0, len(p.filters))
+	filterChannels = append(filterChannels, inChan)
+	for i := 0; i < len(p.filters)-1; i++ {
+		filterChannels = append(filterChannels, make(chan Event, ChanBufferSize))
+	}
+	filterChannels = append(filterChannels, outChan)
+
 	slog.Debug("preparing filters")
-	go func() {
-		for {
-			select {
-			case inEvt := <-inChan:
-				outEvt := inEvt.Copy()
-				// TODO: PERF: run all filters in parallel
-				for _, filter := range p.filters {
-					tmpEvt, err := filter.Run(outEvt)
-					if err == nil {
-						outEvt = tmpEvt
-					} else {
+	for i, f := range p.filters {
+		filterIn := filterChannels[i]
+		filterOut := filterChannels[i+1]
+		filter := f
+		go func() {
+			for {
+				select {
+				case inEvt := <-filterIn:
+					outEvt := inEvt.Copy()
+					err := filter.Run(outEvt, filterOut)
+					if err != nil {
 						slog.Error(fmt.Sprintf("error from filter[%s]: %s", filter.Name, err.Error()))
 					}
+				case <-time.After(30 * time.Second):
+					slog.Debug("no input for 30 seconds")
 				}
-				outChan <- outEvt
-				continue
-			case <-time.After(30 * time.Second):
-				slog.Debug("no input for 30 seconds")
-				continue
 			}
-		}
-	}()
+		}()
+	}
 
 	// goroutines to write outputs
 	slog.Debug("preparing outputs")

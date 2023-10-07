@@ -3,6 +3,7 @@ package loglang
 import (
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -45,7 +46,10 @@ func (fld *Field) Get() (any, error) {
 }
 
 func (fld *Field) Set(value any) {
-	_ = fld.SetCarefully(value)
+	err := fld.SetCarefully(value)
+	if err != nil {
+		slog.Warn(err.Error())
+	}
 }
 
 func (fld *Field) SetCarefully(value any) error {
@@ -77,8 +81,22 @@ func (fld *Field) SetCarefully(value any) error {
 		level = level[key].(map[string]any)
 	}
 
+	switch value.(type) {
+	case string:
+		level[fld.Path[len(fld.Path)-1]] = value
+	case int:
+		level[fld.Path[len(fld.Path)-1]] = value
+	case int64:
+		level[fld.Path[len(fld.Path)-1]] = value
+	case float64:
+		level[fld.Path[len(fld.Path)-1]] = value
+	case bool:
+		level[fld.Path[len(fld.Path)-1]] = value
+	default:
+		return fmt.Errorf("failed Set(); rejected type %v %v", reflect.TypeOf(value), value)
+	}
+
 	level[fld.Path[len(fld.Path)-1]] = value
-	//fld.original.touch(fld.Path[0])
 	return nil
 }
 

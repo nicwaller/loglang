@@ -18,25 +18,28 @@ func main() {
 
 	inputs := []loglang.InputPlugin{
 		input.Generator(input.GeneratorOptions{
-			ID: "gen",
+			ID:       "gen",
+			Interval: time.Minute,
 		}),
 		input.UdpListener("udpYeah", 9999, codec.Kv()),
 	}
 	outputs := []loglang.OutputPlugin{
-		output.StdOut(codec.Kv()),
-		{
-			Run: func(event loglang.Event) error {
-				slog.Debug(event.Field("count").GetString())
-				return nil
-			},
-		},
+		output.StdOut(codec.Json()),
+		//{
+		//	Run: func(event loglang.Event) error {
+		//		slog.Debug(event.Field("count").GetString())
+		//		return nil
+		//	},
+		//},
 	}
 
 	pipeline.Add(loglang.FilterPlugin{
-		Run: func(event loglang.Event) (loglang.Event, error) {
+		Name: "populate [host][ip]",
+		Run: func(event loglang.Event, send chan<- loglang.Event) error {
 			event.Field("host.ip").Set("127.0.0.1")
-			event.Field("time").Set(time.Now())
-			return event, nil
+			send <- event
+			send <- event
+			return nil
 		},
 	})
 

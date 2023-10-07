@@ -5,7 +5,6 @@ type InputPlugin struct {
 	Run  func(chan Event) error
 }
 
-// TODO: filter plugin should return array of events?
 type OutputPlugin struct {
 	Name string
 	Run  func(Event) error
@@ -13,7 +12,7 @@ type OutputPlugin struct {
 
 type FilterPlugin struct {
 	Name string
-	Run  func(Event) (Event, error)
+	Run  func(Event, chan<- Event) error
 }
 
 // TODO: do I need separate StreamCodec and ChunkCodec?

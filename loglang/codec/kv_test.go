@@ -7,7 +7,7 @@ import (
 
 func TestKvEncodeSingleString(t *testing.T) {
 	evt := loglang.NewEvent()
-	evt.SetString("fruit", "apple")
+	evt.Field("fruit").SetString("apple")
 	dat, err := kvEncode(evt)
 	if err != nil {
 		t.Error(err)
@@ -31,10 +31,10 @@ func TestKvDecodeSingleString(t *testing.T) {
 
 func TestKvEncodeMultiString(t *testing.T) {
 	evt := loglang.NewEvent()
-	evt.SetString("size", "large")
-	evt.SetString("colour", "red")
-	evt.SetString("fruit", "apple")
-	evt.SetString("peeled", "false")
+	evt.Field("size").SetString("large")
+	evt.Field("colour").SetString("red")
+	evt.Field("fruit").SetString("apple")
+	evt.Field("peeled").SetString("false")
 	dat, err := kvEncode(evt)
 	if err != nil {
 		t.Error(err)
@@ -59,7 +59,7 @@ func TestKvDecodeMultiString(t *testing.T) {
 
 func TestKvEncodeSingleNumber(t *testing.T) {
 	evt := loglang.NewEvent()
-	evt.SetInt("age", 25)
+	evt.Field("age").SetInt(25)
 	dat, err := kvEncode(evt)
 	if err != nil {
 		t.Error(err)
@@ -74,7 +74,7 @@ func TestKvDecodeSingleNumber(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	v := evt.GetInt("age")
+	v := evt.Field("age").GetInt()
 	if v != 25 {
 		t.Error("expected 25")
 	}
@@ -82,9 +82,9 @@ func TestKvDecodeSingleNumber(t *testing.T) {
 
 func TestKvEncodeMultiNumber(t *testing.T) {
 	evt := loglang.NewEvent()
-	evt.SetInt("high", 77)
-	evt.SetInt("low", 12)
-	evt.SetInt("mid", 44)
+	evt.Field("high").SetInt(77)
+	evt.Field("low").SetInt(12)
+	evt.Field("mid").SetInt(44)
 	dat, err := kvEncode(evt)
 	if err != nil {
 		t.Error(err)
@@ -100,10 +100,10 @@ func TestKvDecodeMultiNumber(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if evt.GetInt("age") != 25 {
+	if evt.Field("age").MustGet() != 25 {
 		t.Error("expected 25")
 	}
-	if evt.GetInt("height") != 184 {
+	if evt.Field("height").MustGet() != 184 {
 		t.Error("expected 184")
 	}
 }
@@ -113,7 +113,7 @@ func TestKvDecodeExtraWhitespace(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if evt.GetInt("age") != 25 {
+	if evt.Field("age").MustGet() != 25 {
 		t.Error("expected 25")
 	}
 }
@@ -135,6 +135,16 @@ func TestKvDecodeEscaping(t *testing.T) {
 	}
 	if evt.Get("msg") != `test"` {
 		t.Error(`expected test"`)
+	}
+}
+
+func TestKvDecodeBareString(t *testing.T) {
+	evt, err := kvDecode([]byte(`hello`))
+	if err != nil {
+		t.Error(err)
+	}
+	if evt.Get("hello") != true {
+		t.Error(`expected true"`)
 	}
 }
 

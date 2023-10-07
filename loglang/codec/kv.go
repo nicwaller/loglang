@@ -2,6 +2,7 @@ package codec
 
 import (
 	"bytes"
+	"log/slog"
 	"loglang/loglang"
 	"strconv"
 	"strings"
@@ -42,6 +43,8 @@ func kvEncode(evt loglang.Event) ([]byte, error) {
 			sb.WriteString(`"` + strVal + `"`)
 		} else if intVal, ok := value.(int); ok {
 			sb.WriteString(strconv.Itoa(intVal))
+		} else if intVal, ok := value.(int64); ok {
+			sb.WriteString(strconv.Itoa(int(intVal)))
 		} else if floatVal, ok := value.(float64); ok {
 			sb.WriteString(strconv.FormatFloat(floatVal, 'f', -1, 64))
 		} else {
@@ -62,13 +65,19 @@ func kvDecode(dat []byte) (loglang.Event, error) {
 			// is there a better way to .split ignoring repeating delimiters in Go?
 			continue
 		}
-		parts := bytes.Split(field, []byte{'='})
-		if len(parts) != 2 {
-			// TODO: be noisier?
-			continue
+		keyB, valueB, didCut := bytes.Cut(field, []byte{'='})
+		if !didCut {
+			if len(keyB) == 0 {
+				slog.Warn("kv decoder encountered weird empty string")
+				continue
+			} else {
+				evt.Field(string(field)).SetBool(true)
+				continue
+			}
 		}
-		key := string(parts[0])
-		value := string(parts[1])
+
+		key := string(keyB)
+		value := string(valueB)
 		quot := `"`
 		if strings.HasSuffix(value, quot) && strings.HasPrefix(value, quot) {
 			// FIXME: This may trim too much. eg `foo="bar\""
