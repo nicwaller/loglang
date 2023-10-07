@@ -8,9 +8,10 @@ import (
 )
 
 // test with echo -n test | nc -u -w0 localhost 9999
-func UdpListener(name string, port int, codec loglang.CodecPlugin) loglang.InputPlugin {
+func UdpListener(name string, eventType string, port int, codec loglang.CodecPlugin) loglang.InputPlugin {
 	return loglang.InputPlugin{
 		Name: name,
+		Type: eventType,
 		Run: func(events chan loglang.Event) error {
 			slog.Debug(fmt.Sprintf("UDP listener starting on %s:%d", name, port),
 				"server.port", port, "log.logger", name,

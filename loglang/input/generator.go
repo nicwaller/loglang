@@ -21,6 +21,7 @@ func Generator(opts GeneratorOptions) loglang.InputPlugin {
 		opts.Interval = time.Second
 	}
 	return loglang.InputPlugin{
+		Type: "generator",
 		Name: opts.ID,
 		Run: func(events chan loglang.Event) error {
 			slog.Info(fmt.Sprintf("starting generator[%s]", opts.ID))

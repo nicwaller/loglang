@@ -32,7 +32,7 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 	const ChanBufferSize = 2
 
 	// all inputs are multiplexed to a single input channel
-	inChan := make(chan Event, ChanBufferSize)
+	combinedInputs := make(chan Event, ChanBufferSize)
 	// a single output channel does fan-out to all outputs
 	outChan := make(chan Event, ChanBufferSize)
 
@@ -40,7 +40,7 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 
 	slog.Debug("setting up filter channels")
 	filterChannels := make([]chan Event, 0, len(p.filters))
-	filterChannels = append(filterChannels, inChan)
+	filterChannels = append(filterChannels, combinedInputs)
 	for i := 0; i < len(p.filters)-1; i++ {
 		filterChannels = append(filterChannels, make(chan Event, ChanBufferSize))
 	}
@@ -75,9 +75,11 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 			case outEvt := <-outChan:
 				// TODO: PERF: run all outputs in parallel?
 				for _, v := range outputs {
-					err := v.Run(outEvt)
-					if err != nil {
-						slog.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
+					if v.Condition == nil || v.Condition(outEvt) {
+						err := v.Run(outEvt)
+						if err != nil {
+							slog.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
+						}
 					}
 				}
 				break
@@ -92,12 +94,26 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 	slog.Debug("preparing inputs")
 	for _, v := range inputs {
 		plugin := v
+		inChan := make(chan Event, ChanBufferSize)
 		go func() {
 			err := plugin.Run(inChan)
 			if err == nil {
 				slog.Warn(fmt.Sprintf("input[%s] exited", plugin.Name))
 			} else {
 				slog.Error(fmt.Sprintf("input[%s] died: %s", plugin.Name, err))
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case inEvt := <-inChan:
+					if plugin.Type != "" {
+						inEvt.Field("type").SetString(plugin.Type)
+					}
+					combinedInputs <- inEvt
+				case <-time.After(30 * time.Second):
+					slog.Debug(fmt.Sprintf("no input from input[%s] for 30 seconds", plugin.Name))
+				}
 			}
 		}()
 	}
