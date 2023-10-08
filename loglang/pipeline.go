@@ -40,34 +40,7 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 
 	// set up filters first, then outputs, then inputs LAST!
 
-	slog.Debug("setting up filter channels")
-	filterChannels := make([]chan Event, 0, len(p.filters))
-	filterChannels = append(filterChannels, combinedInputs)
-	for i := 0; i < len(p.filters)-1; i++ {
-		filterChannels = append(filterChannels, make(chan Event, ChanBufferSize))
-	}
-	filterChannels = append(filterChannels, outChan)
-
-	slog.Debug("preparing filters")
-	for i, f := range p.filters {
-		filterIn := filterChannels[i]
-		filterOut := filterChannels[i+1]
-		filter := f
-		go func() {
-			for {
-				select {
-				case inEvt := <-filterIn:
-					outEvt := inEvt.Copy()
-					err := filter.Run(outEvt, filterOut)
-					if err != nil {
-						slog.Error(fmt.Sprintf("error from filter[%s]: %s", filter.Name, err.Error()))
-					}
-				case <-time.After(30 * time.Second):
-					slog.Debug("no input for 30 seconds")
-				}
-			}
-		}()
-	}
+	RunFilterChain(p.filters, combinedInputs, outChan)
 
 	// goroutines to write outputs
 	slog.Debug("preparing outputs")
@@ -98,11 +71,7 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 		plugin := v
 		inChan := make(chan Event, ChanBufferSize)
 
-		err := RunFilterChain(plugin.Filters, inChan, combinedInputs)
-		if err != nil {
-			slog.Error("entire filter chain failed")
-			return err
-		}
+		RunFilterChain(plugin.Filters, inChan, combinedInputs)
 
 		// start pumping the input for real!
 		go func() {
@@ -131,7 +100,7 @@ func (p *Pipeline) Add(f FilterPlugin) {
 	p.filters = append(p.filters, f)
 }
 
-func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan Event) error {
+func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan Event) {
 	// set up channels between each stage of the filter pipeline
 	allChannels := make([]chan Event, 0)
 	allChannels = append(allChannels, origin)
@@ -144,20 +113,16 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 		filterIn := allChannels[i]
 		filterOut := allChannels[i+1]
 		filter := f // intermediate variable for goroutine
-		index := i  // intermediate variable for goroutine
+		//index := i  // intermediate variable for goroutine
 		go func() {
 			for {
 				select {
 				case inEvt := <-filterIn:
 					outEvt := inEvt.Copy()
-					slog.Debug(fmt.Sprintf("evt arrived input %s stage %d", filter.Name, index))
 					err := filter.Run(outEvt, filterOut)
 					if err != nil {
 						slog.Error(fmt.Sprintf("error from filter[%s]: %s", filter.Name, err.Error()))
 					}
-				case <-time.After(5 * time.Second):
-					slog.Debug("no input for 30 seconds redux")
-					slog.Debug(fmt.Sprintf("no input from input %s filter stage %d for 30 seconds", filter.Name, index))
 				}
 			}
 		}()
@@ -166,14 +131,10 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 		for {
 			select {
 			case inEvt := <-allChannels[len(allChannels)-1]:
-				slog.Debug(fmt.Sprintf("evt arrived input end stage"))
 				destination <- inEvt
-			case <-time.After(5 * time.Second):
-				slog.Debug("no input for 30 seconds redux redux")
-				slog.Debug(fmt.Sprintf("no input from input filter stage for 30 seconds"))
+			case <-time.After(60 * time.Second):
+				slog.Debug("no output from filter chain after 60 seconds")
 			}
 		}
 	}()
-
-	return nil
 }
