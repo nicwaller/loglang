@@ -1,5 +1,7 @@
 package loglang
 
+import "io"
+
 type InputPlugin struct {
 	Name string
 	Type string
@@ -23,4 +25,8 @@ type CodecPlugin struct {
 	Name   string
 	Encode func(Event) ([]byte, error)
 	Decode func([]byte) (Event, error)
+}
+
+type FramingPlugin struct {
+	Run func(io.Reader, chan []byte) error
 }

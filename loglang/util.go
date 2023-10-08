@@ -11,7 +11,6 @@ func Coalesce(args ...any) any {
 			default:
 				return v
 			}
-			return v
 		}
 	}
 	return nil

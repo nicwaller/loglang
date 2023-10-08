@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/lmittmann/tint"
 	"log/slog"
 	"loglang/loglang"
@@ -19,37 +18,39 @@ func main() {
 
 	inputs := []loglang.InputPlugin{
 		input.Generator(input.GeneratorOptions{
-			Interval: 6 * time.Second,
+			Interval: 5 * time.Second,
 		}),
 		input.UdpListener("udptest", "udp", 9999, codec.Kv()),
+		input.TcpListener("tcptest", "tcp", 9998, codec.Plain("message")),
 	}
 
-	slackOut := output.Slack(output.SlackOptions{
-		BotToken: os.Getenv("BOT_TOKEN"),
-		Channel:  "test-3",
-	})
-	slackOut.Condition = func(event loglang.Event) bool {
-		return event.Field("type").GetString() == "slack"
-	}
+	//slackOut := output.Slack(output.SlackOptions{
+	//	BotToken: os.Getenv("BOT_TOKEN"),
+	//	Channel:  "test-3",
+	//})
+	//slackOut.Condition = func(event loglang.Event) bool {
+	//	return event.Field("type").GetString() == "slack"
+	//}
 
 	outputs := []loglang.OutputPlugin{
-		output.StdOut(codec.Json()),
-		slackOut,
+		output.StdOut(codec.SyslogV0()),
+		//slackOut,
 	}
 
 	pipeline.Add(loglang.FilterPlugin{
 		Name: "noop",
 		Run: func(event loglang.Event, send chan<- loglang.Event) error {
 			// send the original event
+			event.Field("level").SetString("info")
 			send <- event
 			// sometimes inject another event for Slack
-			count := event.Field("count").GetInt()
-			if count%2 == 0 && count >= 2 {
-				send <- loglang.Event{Fields: map[string]any{
-					"type":    "slack",
-					"message": fmt.Sprintf("Count (%d) is even", count),
-				}}
-			}
+			//count := event.Field("count").GetInt()
+			//if count%2 == 0 && count >= 2 {
+			//	send <- loglang.Event{Fields: map[string]any{
+			//		"type":    "slack",
+			//		"message": fmt.Sprintf("Count (%d) is even", count),
+			//	}}
+			//}
 			return nil
 		},
 	})
