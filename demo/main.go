@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"loglang/loglang"
 	"loglang/loglang/codec"
+	"loglang/loglang/framing"
 	"loglang/loglang/input"
 	"loglang/loglang/output"
 	"os"
@@ -20,8 +21,8 @@ func main() {
 		input.Generator(input.GeneratorOptions{
 			Interval: 5 * time.Second,
 		}),
-		input.UdpListener("udptest", "udp", 9999, codec.Kv()),
-		input.TcpListener("tcptest", "tcp", 9998, codec.Plain("message")),
+		input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
+		input.TcpListener("tcptest", "tcp", 9998, framing.Whole(), codec.Plain("message")),
 	}
 
 	//slackOut := output.Slack(output.SlackOptions{

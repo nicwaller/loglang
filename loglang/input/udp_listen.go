@@ -1,18 +1,20 @@
 package input
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"loglang/loglang"
 	"net"
+	"time"
 )
 
 // test with echo -n test | nc -u -w0 localhost 9999
-func UdpListener(name string, eventType string, port int, codec loglang.CodecPlugin) loglang.InputPlugin {
+func UdpListener(name string, eventType string, port int, framer loglang.FramingPlugin, codec loglang.CodecPlugin) loglang.InputPlugin {
 	return loglang.InputPlugin{
 		Name: name,
 		Type: eventType,
-		Run: func(events chan loglang.Event) error {
+		Run: func(send chan loglang.Event) error {
 			slog.Debug(fmt.Sprintf("UDP listener starting on %s:%d", name, port),
 				"server.port", port, "log.logger", name,
 			)
@@ -35,12 +37,32 @@ func UdpListener(name string, eventType string, port int, codec loglang.CodecPlu
 				if err != nil {
 					return err
 				}
-				evt, err := codec.Decode(buf[:rlen])
-				if err != nil {
-					slog.Error(fmt.Errorf("lost datagram: %w", err).Error())
-					continue
-				}
-				events <- evt
+				slog.Debug(fmt.Sprintf("got UDP datagram of %d bytes", rlen))
+
+				frames := make(chan []byte)
+				go func() {
+					err := framer.Run(bytes.NewReader(buf[:rlen]), frames)
+					if err != nil {
+						slog.Error(err.Error())
+					}
+				}()
+				go func() {
+					for {
+						select {
+						case frame := <-frames:
+							slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
+							evt, err := codec.Decode(frame)
+							if err != nil {
+								slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())
+							} else {
+								send <- evt
+							}
+						case <-time.After(30 * time.Second):
+							return
+						}
+
+					}
+				}()
 			}
 		},
 	}

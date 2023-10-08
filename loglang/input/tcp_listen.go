@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"loglang/loglang"
-	"loglang/loglang/framing"
 	"net"
 	"strconv"
 	"time"
 )
 
-func TcpListener(name string, eventType string, port int, codec loglang.CodecPlugin) loglang.InputPlugin {
+func TcpListener(name string, eventType string, port int, framer loglang.FramingPlugin, codec loglang.CodecPlugin) loglang.InputPlugin {
 	return loglang.InputPlugin{
 		Name: name,
 		Type: eventType,
@@ -27,7 +26,7 @@ func TcpListener(name string, eventType string, port int, codec loglang.CodecPlu
 				if err != nil {
 					// handle error
 				}
-				go tcpReading(conn, send, framing.Lines(), codec)
+				go tcpReading(conn, send, framer, codec)
 			}
 		},
 	}
@@ -49,7 +48,7 @@ func tcpReading(conn net.Conn, send chan loglang.Event, framer loglang.FramingPl
 		for {
 			select {
 			case frame := <-frames:
-				slog.Debug("got a frame of ? bytes")
+				slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 				evt, err := codec.Decode(frame)
 				if err != nil {
 					slog.Error(err.Error())

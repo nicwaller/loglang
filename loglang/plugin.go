@@ -3,9 +3,10 @@ package loglang
 import "io"
 
 type InputPlugin struct {
-	Name string
-	Type string
-	Run  func(chan Event) error
+	Name    string
+	Type    string
+	Run     func(chan Event) error
+	Filters []FilterPlugin
 }
 
 type OutputPlugin struct {
