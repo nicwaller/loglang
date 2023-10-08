@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"loglang/loglang"
 	"loglang/loglang/codec"
-	"loglang/loglang/framing"
 	"loglang/loglang/input"
 	"loglang/loglang/output"
 	"os"
@@ -18,11 +17,12 @@ func main() {
 	pipeline := loglang.NewPipeline()
 
 	inputs := []loglang.InputPlugin{
-		input.Generator(input.GeneratorOptions{
-			Interval: 5 * time.Second,
-		}),
-		input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
-		input.TcpListener("tcptest", "tcp", 9998, framing.Whole(), codec.Plain("message")),
+		//input.Generator(input.GeneratorOptions{
+		//	Interval: 5 * time.Second,
+		//}),
+		//input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
+		//input.TcpListener("tcptest", "tcp", 9998, framing.Whole(), codec.Plain("message")),
+		input.GelfUDP(9997),
 	}
 
 	//slackOut := output.Slack(output.SlackOptions{
@@ -34,27 +34,26 @@ func main() {
 	//}
 
 	outputs := []loglang.OutputPlugin{
-		output.StdOut(codec.SyslogV0()),
+		output.StdOut(codec.Kv()),
 		//slackOut,
 	}
 
-	pipeline.Add(loglang.FilterPlugin{
-		Name: "noop",
-		Run: func(event loglang.Event, send chan<- loglang.Event) error {
-			// send the original event
-			event.Field("level").SetString("info")
-			send <- event
-			// sometimes inject another event for Slack
-			//count := event.Field("count").GetInt()
-			//if count%2 == 0 && count >= 2 {
-			//	send <- loglang.Event{Fields: map[string]any{
-			//		"type":    "slack",
-			//		"message": fmt.Sprintf("Count (%d) is even", count),
-			//	}}
-			//}
-			return nil
-		},
-	})
+	//pipeline.Add(loglang.FilterPlugin{
+	//	Name: "noop",
+	//	Run: func(event loglang.Event, send chan<- loglang.Event) error {
+	//		// send the original event
+	//		send <- event
+	//		// sometimes inject another event for Slack
+	//		//count := event.Field("count").GetInt()
+	//		//if count%2 == 0 && count >= 2 {
+	//		//	send <- loglang.Event{Fields: map[string]any{
+	//		//		"type":    "slack",
+	//		//		"message": fmt.Sprintf("Count (%d) is even", count),
+	//		//	}}
+	//		//}
+	//		return nil
+	//	},
+	//})
 
 	//pipeline.Add(filter.Json("test1", "message"))
 	//pipeline.Add(filter.Rename("?", "msg", "message"))

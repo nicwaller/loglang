@@ -25,6 +25,7 @@ func Remove(name string, field string) loglang.FilterPlugin {
 	}
 }
 
+// FIXME: rename doesn't support deep fields
 func Rename(name string, oldField string, newField string) loglang.FilterPlugin {
 	return loglang.FilterPlugin{
 		Name: name,

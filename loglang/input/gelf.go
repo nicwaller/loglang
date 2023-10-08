@@ -1,8 +1,10 @@
 package input
 
 import (
+	"log/slog"
 	"loglang/loglang"
 	"loglang/loglang/codec"
+	"loglang/loglang/filter"
 	"loglang/loglang/framing"
 )
 
@@ -22,5 +24,19 @@ import (
 //	}
 func GelfUDP(port int) loglang.InputPlugin {
 	p := UdpListener("GELF-UDP", "gelf", port, framing.Whole(), codec.Json())
+	p.Filters = append(p.Filters, loglang.FilterPlugin{
+		Run: func(event loglang.Event, events chan<- loglang.Event) error {
+			if event.Field("version").GetString() != "1.1" {
+				slog.Warn("received GELF message with unsupported version")
+			}
+			if event.Field("level").GetString() == "" {
+				slog.Warn("received GELF message with missing level")
+			}
+			events <- event
+			return nil
+		},
+	})
+	p.Filters = append(p.Filters, filter.Rename("", "level", "log.level"))
+	p.Filters = append(p.Filters, filter.Rename("", "short_message", "message"))
 	return p
 }

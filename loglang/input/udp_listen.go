@@ -30,10 +30,14 @@ func UdpListener(name string, eventType string, port int, framer loglang.Framing
 				_ = conn.Close()
 			}(conn)
 
-			var buf [4096]byte
 			for {
+				var buf [4096]byte
 				// UDP is not stream based, so we read each individual datagram
-				rlen, _, err := conn.ReadFromUDP(buf[:])
+				rlen, addr, err := conn.ReadFromUDP(buf[:])
+				if rlen == 1 {
+					// FIXME : wtf is this X
+					continue
+				}
 				if err != nil {
 					return err
 				}
@@ -52,6 +56,8 @@ func UdpListener(name string, eventType string, port int, framer loglang.Framing
 						case frame := <-frames:
 							slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 							evt, err := codec.Decode(frame)
+							// TODO: populate more ECS-style fields, if option is enabled
+							evt.Field("client.address").SetString(addr.String())
 							if err != nil {
 								slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())
 							} else {
