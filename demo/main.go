@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/input"
@@ -16,9 +17,12 @@ func main() {
 
 	p := loglang.NewPipeline("demo", loglang.PipelineOptions{
 		MarkIngestionTime: true,
+		Schema:            loglang.SchemaElasticCommonSchema,
 	})
 
-	p.Input("heartbeat", input.Generator(input.GeneratorOptions{Interval: time.Second}))
+	p.Input("heartbeat", input.Generator(input.GeneratorOptions{
+		Interval: time.Second,
+	}))
 	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
 	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
@@ -28,6 +32,7 @@ func main() {
 	go func() {
 		select {
 		case <-c:
+			fmt.Println() // ^C appears in terminal, and I want a newline after that to keep things clean
 			slog.Info("Caught Ctrl-C SIGINT")
 			p.Stop()
 		}

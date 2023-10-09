@@ -8,9 +8,6 @@ import (
 )
 
 func Generator(opts GeneratorOptions) loglang.InputPlugin {
-	if opts.Field == "" {
-		opts.Field = "message"
-	}
 	if opts.Interval < time.Second {
 		opts.Interval = time.Second
 	}
@@ -24,10 +21,9 @@ type generator struct {
 
 type GeneratorOptions struct {
 	ID       string
-	Message  string
-	Field    string
 	Interval time.Duration
 	Count    int
+	Schema   loglang.SchemaModel
 }
 
 func (p *generator) Run(ctx context.Context, events chan loglang.Event) error {
@@ -42,14 +38,24 @@ func (p *generator) Run(ctx context.Context, events chan loglang.Event) error {
 	log := slog.With("pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"))
 
+	schema := p.opts.Schema
+	if schema == loglang.SchemaNotDefined {
+		if pipelineSchema, ok := ctx.Value("schema").(loglang.SchemaModel); ok {
+			schema = pipelineSchema
+		}
+	}
+
 	opts := p.opts
 	for count := 0; running; count++ {
 		evt := loglang.NewEvent()
-		evt.Field("event", "module").SetString("loglang")
-		evt.Field("event", "dataset").SetString("heartbeat")
-		evt.Field("event", "sequence").SetInt(count)
-		if opts.Field != "" && opts.Message != "" {
-			evt.Field(opts.Field).SetString(opts.Message)
+		if schema == loglang.SchemaElasticCommonSchema {
+			evt.Field("event", "module").SetString("loglang")
+			evt.Field("event", "dataset").SetString("heartbeat")
+			evt.Field("event", "sequence").SetInt(count)
+		} else {
+			evt.Field("module").SetString("loglang")
+			evt.Field("dataset").SetString("heartbeat")
+			evt.Field("sequence").SetInt(count)
 		}
 		events <- evt
 		time.Sleep(opts.Interval)

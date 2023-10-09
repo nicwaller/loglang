@@ -9,6 +9,9 @@ import (
 )
 
 func NewPipeline(name string, options PipelineOptions) *Pipeline {
+	if options.Schema == SchemaNotDefined {
+		options.Schema = SchemaElasticCommonSchema
+	}
 	if options.StalledOutputThreshold == 0 {
 		options.StalledOutputThreshold = 24 * time.Hour
 	}
@@ -18,16 +21,30 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	var p Pipeline
 	p.opts = options
 	p.Name = name
+
 	p.Filter("default @timestamp", func(event Event, events chan<- Event) error {
-		timeStr := time.Now().Format(time.RFC3339)
-		event.Field("@timestamp").Default(timeStr)
-		// ECS compatibility
-		if p.opts.MarkIngestionTime {
-			event.Field("event", "ingested").Default(timeStr)
-		}
+		event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
 		events <- event
 		return nil
 	})
+
+	if p.opts.MarkIngestionTime {
+		f := Field{}
+
+		if options.Schema == SchemaElasticCommonSchema {
+			f.Path = []string{"event", "ingested"}
+		} else {
+			f.Path = []string{"ingested"}
+		}
+
+		p.Filter("mark ingestion time", func(event Event, events chan<- Event) error {
+			f.original = &event
+			f.Default(time.Now().Format(time.RFC3339))
+			events <- event
+			return nil
+		})
+	}
+
 	return &p
 }
 
@@ -44,6 +61,7 @@ type PipelineOptions struct {
 	StalledInputThreshold  time.Duration
 	StalledOutputThreshold time.Duration
 	MarkIngestionTime      bool
+	Schema                 SchemaModel
 }
 
 type inputDetail struct {
@@ -63,6 +81,7 @@ func (p *Pipeline) Run() error {
 	ctx := context.Background()
 	ctx, p.stop = context.WithCancel(ctx)
 	ctx = context.WithValue(ctx, "pipeline", p.GetName())
+	ctx = context.WithValue(ctx, "schema", p.opts.Schema)
 
 	log := slog.Default()
 	log = log.With("pipeline", p.GetName())

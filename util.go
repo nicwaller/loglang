@@ -8,6 +8,15 @@ func Map[I any, O any](mapper func(I) O, orig []I) []O {
 	return changed
 }
 
+func CoalesceStr(args ...string) string {
+	for _, v := range args {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func Coalesce(args ...any) any {
 	for _, v := range args {
 		if v != nil {
