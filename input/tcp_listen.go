@@ -48,7 +48,7 @@ func tcpReading(conn net.Conn, send chan loglang.Event, framer loglang.FramingPl
 		for {
 			select {
 			case frame := <-frames:
-				slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
+				//slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 				evt, err := codec.Decode(frame)
 				if err != nil {
 					slog.Error(err.Error())

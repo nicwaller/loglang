@@ -45,14 +45,25 @@ func (fld *Field) Get() (any, error) {
 	panic("impossible")
 }
 
+func (fld *Field) Default(value any) {
+	err := fld.set(value, false)
+	if err != nil {
+		slog.Warn(err.Error())
+	}
+}
+
 func (fld *Field) Set(value any) {
-	err := fld.SetCarefully(value)
+	err := fld.set(value, true)
 	if err != nil {
 		slog.Warn(err.Error())
 	}
 }
 
 func (fld *Field) SetCarefully(value any) error {
+	return fld.set(value, true)
+}
+
+func (fld *Field) set(value any, overwrite bool) error {
 	if fld.original == nil {
 		return fmt.Errorf("cannot Field.Get() because there is no linked event")
 	}
@@ -81,22 +92,27 @@ func (fld *Field) SetCarefully(value any) error {
 		level = level[key].(map[string]any)
 	}
 
+	leafKey := fld.Path[len(fld.Path)-1]
+	if _, exists := level[leafKey]; exists && !overwrite {
+		// being quiet is okay if we explicitly do not want overwrites
+		return nil
+	}
+
 	switch value.(type) {
 	case string:
-		level[fld.Path[len(fld.Path)-1]] = value
+		level[leafKey] = value
 	case int:
-		level[fld.Path[len(fld.Path)-1]] = value
+		level[leafKey] = value
 	case int64:
-		level[fld.Path[len(fld.Path)-1]] = value
+		level[leafKey] = value
 	case float64:
-		level[fld.Path[len(fld.Path)-1]] = value
+		level[leafKey] = value
 	case bool:
-		level[fld.Path[len(fld.Path)-1]] = value
+		level[leafKey] = value
 	default:
 		return fmt.Errorf("failed Set(); rejected type %v %v", reflect.TypeOf(value), value)
 	}
 
-	level[fld.Path[len(fld.Path)-1]] = value
 	return nil
 }
 

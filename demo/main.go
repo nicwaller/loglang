@@ -4,6 +4,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
+	"github.com/nicwaller/loglang/framing"
 	"github.com/nicwaller/loglang/input"
 	"github.com/nicwaller/loglang/output"
 	"log/slog"
@@ -20,9 +21,9 @@ func main() {
 		//input.Generator(input.GeneratorOptions{
 		//	Interval: 5 * time.Second,
 		//}),
-		//input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
+		input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
 		//input.TcpListener("tcptest", "tcp", 9998, framing.Whole(), codec.Plain("message")),
-		input.GelfUDP(9997),
+		//input.GelfUDP(9997),
 	}
 
 	//slackOut := output.Slack(output.SlackOptions{

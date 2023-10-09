@@ -15,7 +15,7 @@ func NewPipeline() Pipeline {
 		{
 			Name: "populate @timestamp",
 			Run: func(event Event, send chan<- Event) error {
-				event.Field("@timestamp").Set(time.Now().Format(time.RFC3339))
+				event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
 				send <- event
 				return nil
 			},

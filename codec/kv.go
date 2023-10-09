@@ -47,6 +47,8 @@ func kvEncode(evt loglang.Event) ([]byte, error) {
 			sb.WriteString(strconv.Itoa(int(intVal)))
 		} else if floatVal, ok := value.(float64); ok {
 			sb.WriteString(strconv.FormatFloat(floatVal, 'f', -1, 64))
+		} else if boolVal, ok := value.(bool); ok {
+			sb.WriteString(strconv.FormatBool(boolVal))
 		} else {
 			panic("unhandled type")
 		}

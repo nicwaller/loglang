@@ -54,7 +54,7 @@ func UdpListener(name string, eventType string, port int, framer loglang.Framing
 					for {
 						select {
 						case frame := <-frames:
-							slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
+							//slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 							evt, err := codec.Decode(frame)
 							// TODO: populate more ECS-style fields, if option is enabled
 							evt.Field("client.address").SetString(addr.String())
