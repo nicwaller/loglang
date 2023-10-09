@@ -16,6 +16,7 @@ func main() {
 	setupLogging()
 
 	pipeline := loglang.NewPipeline()
+	//pipeline.Name = "demo"
 
 	inputs := []loglang.InputPlugin{
 		//input.Generator(input.GeneratorOptions{

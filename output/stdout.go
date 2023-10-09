@@ -7,7 +7,7 @@ import (
 
 func StdOut(codec loglang.CodecPlugin) loglang.OutputPlugin {
 	return loglang.OutputPlugin{
-		Name: "",
+		Name: "stdout",
 		Run: func(evt loglang.Event) (err error) {
 			dat, err := codec.Encode(evt)
 			if err != nil {

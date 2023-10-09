@@ -25,6 +25,7 @@ func NewPipeline() Pipeline {
 }
 
 type Pipeline struct {
+	Name    string
 	filters []FilterPlugin
 }
 
@@ -33,6 +34,11 @@ type Pipeline struct {
 func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 	const ChanBufferSize = 2
 
+	log := slog.Default()
+	if p.Name != "" {
+		log = log.With("pipeline", p.Name)
+	}
+
 	// all inputs are multiplexed to a single input channel
 	combinedInputs := make(chan Event, ChanBufferSize)
 	// a single output channel does fan-out to all outputs
@@ -40,33 +46,35 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 
 	// set up filters first, then outputs, then inputs LAST!
 
+	log.Debug("preparing filter chain")
 	RunFilterChain(p.filters, combinedInputs, outChan)
 
 	// goroutines to write outputs
-	slog.Debug("preparing outputs")
-	go func() {
-		for {
-			select {
-			case outEvt := <-outChan:
-				// TODO: PERF: run all outputs in parallel?
-				for _, v := range outputs {
+	log.Debug("preparing outputs")
+	for _, v := range outputs {
+		go func() {
+			for {
+				select {
+				case outEvt := <-outChan:
+
 					if v.Condition == nil || v.Condition(outEvt) {
 						err := v.Run(outEvt)
 						if err != nil {
-							slog.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
+							log.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
 						}
 					}
+					break
+				case <-time.After(30 * time.Second):
+					log.Debug("no output for 30 seconds")
+					continue
 				}
-				break
-			case <-time.After(30 * time.Second):
-				slog.Debug("no output for 30 seconds")
-				continue
 			}
-		}
-	}()
+		}()
+		log.Info(fmt.Sprintf("output[%s] started", v.Name))
+	}
 
 	// start each input in a separate goroutine
-	slog.Debug("preparing inputs")
+	log.Debug("preparing inputs")
 	for _, v := range inputs {
 		plugin := v
 		inChan := make(chan Event, ChanBufferSize)
@@ -77,18 +85,18 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 		go func() {
 			err := plugin.Run(inChan)
 			if err == nil {
-				slog.Warn(fmt.Sprintf("input[%s] exited", plugin.Name))
+				log.Warn(fmt.Sprintf("input[%s] exited", plugin.Name))
 			} else {
-				slog.Error(fmt.Sprintf("input[%s] died: %s", plugin.Name, err))
+				log.Error(fmt.Sprintf("input[%s] died: %s", plugin.Name, err))
 			}
 		}()
 	}
 
-	slog.Info("started pipeline")
+	log.Info("started pipeline")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	for _ = range c {
-		slog.Info("Caught Ctrl-C SIGINT; exiting...")
+		log.Info("Caught Ctrl-C SIGINT; exiting...")
 		// TODO: pause inputs, then wait for all pipeline stages to finish.
 		break
 	}
@@ -121,6 +129,7 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 					outEvt := inEvt.Copy()
 					err := filter.Run(outEvt, filterOut)
 					if err != nil {
+						// TODO: add pipeline name
 						slog.Error(fmt.Sprintf("error from filter[%s]: %s", filter.Name, err.Error()))
 					}
 				}
@@ -133,6 +142,7 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 			case inEvt := <-allChannels[len(allChannels)-1]:
 				destination <- inEvt
 			case <-time.After(60 * time.Second):
+				// TODO: add pipeline name
 				slog.Debug("no output from filter chain after 60 seconds")
 			}
 		}
