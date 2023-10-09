@@ -2,10 +2,18 @@
 
 There are several tools for event processing. How do they compare?
 
-# Logstash
+# Fluent Bit
 
-# Vector
+https://fluentbit.io
+
+# Logstash (by Elastic)
+
+https://www.elastic.co/logstash
+
+# Vector (by Datadog)
+
+https://vector.dev
 
 # Amazon EventBridge Pipes
 
-# Mulesoft
+https://aws.amazon.com/eventbridge/pipes/
