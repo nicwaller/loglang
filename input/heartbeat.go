@@ -4,10 +4,11 @@ import (
 	"context"
 	"github.com/nicwaller/loglang"
 	"log/slog"
+	"os"
 	"time"
 )
 
-func Generator(opts GeneratorOptions) loglang.InputPlugin {
+func Heartbeat(opts HeartbeatOptions) loglang.InputPlugin {
 	if opts.Interval < time.Second {
 		opts.Interval = time.Second
 	}
@@ -16,10 +17,10 @@ func Generator(opts GeneratorOptions) loglang.InputPlugin {
 }
 
 type generator struct {
-	opts GeneratorOptions
+	opts HeartbeatOptions
 }
 
-type GeneratorOptions struct {
+type HeartbeatOptions struct {
 	ID       string
 	Interval time.Duration
 	Count    int
@@ -45,14 +46,28 @@ func (p *generator) Run(ctx context.Context, events chan loglang.Event) error {
 		}
 	}
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "loglang"
+	}
 	opts := p.opts
 	for count := 0; running; count++ {
 		evt := loglang.NewEvent()
-		if schema == loglang.SchemaElasticCommonSchema {
+		switch schema {
+		case loglang.SchemaECS:
+			evt.Field("host", "name").SetString(hostname)
 			evt.Field("event", "module").SetString("loglang")
 			evt.Field("event", "dataset").SetString("heartbeat")
 			evt.Field("event", "sequence").SetInt(count)
-		} else {
+		case loglang.SchemaLogstashFlat:
+			evt.Field("host").SetString(hostname)
+			evt.Field("clock").SetInt(count)
+		case loglang.SchemaLogstashECS:
+			evt.Field("host", "name").SetString(hostname)
+			evt.Field("event", "sequence").SetInt(count)
+		case loglang.SchemaFlat:
+			fallthrough
+		default:
 			evt.Field("module").SetString("loglang")
 			evt.Field("dataset").SetString("heartbeat")
 			evt.Field("sequence").SetInt(count)

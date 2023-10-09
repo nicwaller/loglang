@@ -32,6 +32,12 @@ type udpListener struct {
 	port int
 }
 
+type UdpListenerOptions struct {
+	Framing loglang.FramingPlugin
+	Codec   loglang.CodecPlugin
+	Schema  loglang.SchemaModel
+}
+
 func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error {
 	log := slog.Default().With(
 		"pipeline", ctx.Value("pipeline"),
@@ -46,6 +52,13 @@ func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error 
 			running = false
 		}
 	}()
+
+	schema := p.opts.Schema
+	if schema == loglang.SchemaNotDefined {
+		if pipelineSchema, ok := ctx.Value("schema").(loglang.SchemaModel); ok {
+			schema = pipelineSchema
+		}
+	}
 
 	addr := net.UDPAddr{
 		Port: p.port,
@@ -87,13 +100,23 @@ func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error 
 				case frame := <-frames:
 					//slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 					evt, err := p.opts.Codec.Decode(frame)
-					// TODO: populate more ECS-style fields, if option is enabled
-					evt.Field("client.address").SetString(addr.String())
-					evt.Field("client.ip").SetString(addr.IP.String())
-					evt.Field("client.port").SetInt(addr.Port)
-					evt.Field("client.bytes").SetInt(len(frame))
-					evt.Field("server.port").SetInt(p.port)
-					evt.Field("network.transport").SetString("udp")
+					if schema == loglang.SchemaECS {
+						// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
+						evt.Field("client", "address").SetString(addr.String())
+						evt.Field("client", "ip").SetString(addr.IP.String())
+						evt.Field("client", "port").SetInt(addr.Port)
+						evt.Field("client", "bytes").SetInt(len(frame))
+						evt.Field("server", "port").SetInt(p.port)
+						evt.Field("network", "transport").SetString("udp")
+					} else if schema == loglang.SchemaLogstashFlat {
+						evt.Field("host").SetString(addr.IP.String())
+					} else {
+						evt.Field("remote_addr").SetString(addr.String())
+						evt.Field("client.ip").SetString(addr.IP.String())
+						evt.Field("client.port").SetInt(addr.Port)
+						evt.Field("server.port").SetInt(p.port)
+						evt.Field("transport").SetString("udp")
+					}
 					if err != nil {
 						slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())
 					} else {
@@ -108,9 +131,4 @@ func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error 
 	}
 
 	return nil
-}
-
-type UdpListenerOptions struct {
-	Framing loglang.FramingPlugin
-	Codec   loglang.CodecPlugin
 }

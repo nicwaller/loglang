@@ -10,7 +10,7 @@ import (
 
 func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	if options.Schema == SchemaNotDefined {
-		options.Schema = SchemaElasticCommonSchema
+		options.Schema = SchemaECS
 	}
 	if options.StalledOutputThreshold == 0 {
 		options.StalledOutputThreshold = 24 * time.Hour
@@ -31,7 +31,7 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	if p.opts.MarkIngestionTime {
 		f := Field{}
 
-		if options.Schema == SchemaElasticCommonSchema {
+		if options.Schema == SchemaECS {
 			f.Path = []string{"event", "ingested"}
 		} else {
 			f.Path = []string{"ingested"}

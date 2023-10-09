@@ -16,13 +16,11 @@ func main() {
 	setupLogging()
 
 	p := loglang.NewPipeline("demo", loglang.PipelineOptions{
-		MarkIngestionTime: true,
-		Schema:            loglang.SchemaElasticCommonSchema,
+		MarkIngestionTime: false,
+		Schema:            loglang.SchemaECS,
 	})
 
-	p.Input("heartbeat", input.Generator(input.GeneratorOptions{
-		Interval: time.Second,
-	}))
+	p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: time.Second}))
 	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
 	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
