@@ -2,32 +2,21 @@ package loglang
 
 import "io"
 
-type InputPlugin struct {
-	Name    string
-	Type    string
-	Run     func(chan Event) error
-	Filters []FilterPlugin
+type InputPlugin interface {
+	Run(chan Event) error
 }
 
-type OutputPlugin struct {
-	Name      string
-	Run       func(Event) error
-	Condition func(Event) bool
+type OutputPlugin interface {
+	Run(Event) error
 }
 
-// TODO: PERF: maybe want to have number of goroutines specified as part of the plugin?
-type FilterPlugin struct {
-	Name string
-	Run  func(Event, chan<- Event) error
+type FilterPlugin func(Event, chan<- Event) error
+
+type CodecPlugin interface {
+	Encode(Event) ([]byte, error)
+	Decode([]byte) (Event, error)
 }
 
-// TODO: do I need separate StreamCodec and ChunkCodec?
-type CodecPlugin struct {
-	Name   string
-	Encode func(Event) ([]byte, error)
-	Decode func([]byte) (Event, error)
-}
-
-type FramingPlugin struct {
-	Run func(io.Reader, chan []byte) error
+type FramingPlugin interface {
+	Run(io.Reader, chan []byte) error
 }

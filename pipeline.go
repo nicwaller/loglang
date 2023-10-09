@@ -9,35 +9,54 @@ import (
 	"log/slog"
 )
 
-func NewPipeline() Pipeline {
-	var p Pipeline
-	p.filters = []FilterPlugin{
-		{
-			Name: "populate @timestamp",
-			Run: func(event Event, send chan<- Event) error {
-				event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
-				send <- event
-				return nil
-			},
-		},
+func NewPipeline(name string, options PipelineOptions) *Pipeline {
+	if options.StalledOutputThreshold == 0 {
+		options.StalledOutputThreshold = 24 * time.Hour
 	}
-	return p
+	if options.StalledInputThreshold == 0 {
+		options.StalledInputThreshold = 24 * time.Hour
+	}
+	var p Pipeline
+	p.opts = options
+	p.Name = name
+	p.Filter("default @timestamp", func(event Event, events chan<- Event) error {
+		event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
+		events <- event
+		return nil
+	})
+	return &p
 }
 
 type Pipeline struct {
 	Name    string
-	filters []FilterPlugin
+	inputs  []NamedEntity[inputDetail]
+	filters []NamedEntity[FilterPlugin]
+	outputs []NamedEntity[OutputPlugin]
+	opts    PipelineOptions
 }
+
+type PipelineOptions struct {
+	StalledInputThreshold  time.Duration
+	StalledOutputThreshold time.Duration
+}
+
+type inputDetail struct {
+	plugin      InputPlugin
+	filterChain []FilterPlugin
+}
+
+func (p *Pipeline) GetName() string {
+	return p.Name
+}
+
+const ChanBufferSize = 2
 
 // TODO: Inputs and Outputs should have codecs for converting between original and []byte
 
-func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
-	const ChanBufferSize = 2
+func (p *Pipeline) Run() error {
 
 	log := slog.Default()
-	if p.Name != "" {
-		log = log.With("pipeline", p.Name)
-	}
+	log = log.With("Pipeline", p.GetName())
 
 	// all inputs are multiplexed to a single input channel
 	combinedInputs := make(chan Event, ChanBufferSize)
@@ -47,76 +66,156 @@ func (p *Pipeline) Run(inputs []InputPlugin, outputs []OutputPlugin) error {
 	// set up filters first, then outputs, then inputs LAST!
 
 	log.Debug("preparing filter chain")
-	RunFilterChain(p.filters, combinedInputs, outChan)
+	filters := Map(func(t NamedEntity[FilterPlugin]) FilterPlugin {
+		return t.value
+	}, p.filters)
+	RunFilterChain(filters, combinedInputs, outChan)
+	log.Info(fmt.Sprintf("set up %d filters", len(p.filters)))
 
-	// goroutines to write outputs
-	log.Debug("preparing outputs")
-	for _, v := range outputs {
-		go func() {
-			for {
-				select {
-				case outEvt := <-outChan:
-
-					if v.Condition == nil || v.Condition(outEvt) {
-						err := v.Run(outEvt)
-						if err != nil {
-							log.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
-						}
-					}
-					break
-				case <-time.After(30 * time.Second):
-					log.Debug("no output for 30 seconds")
-					continue
-				}
-			}
-		}()
-		log.Info(fmt.Sprintf("output[%s] started", v.Name))
+	log.Debug("starting outputs")
+	if err := p.runOutputs(outChan); err != nil {
+		return err
 	}
 
-	// start each input in a separate goroutine
-	log.Debug("preparing inputs")
-	for _, v := range inputs {
-		plugin := v
-		inChan := make(chan Event, ChanBufferSize)
-
-		RunFilterChain(plugin.Filters, inChan, combinedInputs)
-
-		// start pumping the input for real!
-		go func() {
-			err := plugin.Run(inChan)
-			if err == nil {
-				log.Warn(fmt.Sprintf("input[%s] exited", plugin.Name))
-			} else {
-				log.Error(fmt.Sprintf("input[%s] died: %s", plugin.Name, err))
-			}
-		}()
+	log.Debug("starting inputs")
+	if err := p.runInputs(combinedInputs); err != nil {
+		return err
 	}
-
-	log.Info("started pipeline")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-	for _ = range c {
+	for range c {
 		log.Info("Caught Ctrl-C SIGINT; exiting...")
-		// TODO: pause inputs, then wait for all pipeline stages to finish.
+		// TODO: pause inputs, then wait for all Pipeline stages to finish.
 		break
 	}
 
 	return nil
 }
 
-func (p *Pipeline) Add(f FilterPlugin) {
-	p.filters = append(p.filters, f)
+func (p *Pipeline) runInputs(combinedInputs chan Event) error {
+	for _, entity := range p.inputs {
+		plugin := entity.value.plugin
+
+		log := slog.Default()
+		log = log.With("Pipeline", p.GetName())
+		log = log.With("plugin", entity.name)
+
+		inChan := make(chan Event, ChanBufferSize)
+
+		RunFilterChain(entity.value.filterChain, inChan, combinedInputs)
+
+		log.Info("starting input")
+		go func() {
+			err := plugin.Run(inChan)
+			if err == nil {
+				log.Warn("input exited")
+			} else {
+				log.Error("input failed", "error", err)
+			}
+		}()
+	}
+	return nil
+}
+
+func (p *Pipeline) runOutputs(events chan Event) error {
+	// set up an output channel for each output
+	outputChannels := make([]chan Event, len(p.outputs))
+	for i := 0; i < len(p.outputs); i++ {
+		// TODO: PERF: we might want a larger buffer here
+		// TODO: alert if length of output channel becomes large using len()
+		outputChannels[i] = make(chan Event, 1)
+	}
+
+	// TODO: remove debugging to print channel sizes
+	//go func() {
+	//	for {
+	//		fmt.Printf("len(events chan) = %d\n", len(events))
+	//		for i := 0; i < len(p.outputs); i++ {
+	//			fmt.Printf("len(outputChannels[%d]) = %d\n", i, len(outputChannels[i]))
+	//		}
+	//		time.Sleep(2 * time.Second)
+	//	}
+	//}()
+
+	// set up fan-out replication of events
+	alertThreshold := p.opts.StalledOutputThreshold
+	go func() {
+		log := slog.Default()
+		log = log.With("Pipeline", p.GetName())
+		for {
+			select {
+			case event := <-events:
+				for i := 0; i < len(p.outputs); i++ {
+					outputChannels[i] <- event
+				}
+			case <-time.After(alertThreshold):
+				// TODO: make this customizable? PipelineOpts?
+				log.Info("no output for 3 seconds")
+				log.Info(fmt.Sprintf("len[chan0] == %d", len(outputChannels[0])))
+			}
+		}
+
+	}()
+
+	for i, namedOutput := range p.outputs {
+		log := slog.Default()
+		log = log.With("Pipeline", p.GetName())
+		log = log.With("plugin", namedOutput.name)
+
+		output := namedOutput.value
+		soloChan := outputChannels[i]
+
+		log.Info("starting output")
+		go func() {
+			for {
+				select {
+				case outEvt := <-soloChan:
+					err := output.Run(outEvt)
+					if err != nil {
+						log.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
+					}
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+func (p *Pipeline) Input(name string, plugin InputPlugin, filters ...FilterPlugin) {
+	p.inputs = append(p.inputs, NamedEntity[inputDetail]{
+		name: name,
+		value: inputDetail{
+			plugin:      plugin,
+			filterChain: filters,
+		},
+	})
+}
+
+func (p *Pipeline) Filter(name string, f FilterPlugin) {
+	// TODO: this is where we associate a name with a filter
+	p.filters = append(p.filters, NamedEntity[FilterPlugin]{
+		name:  name,
+		value: f,
+	})
+}
+
+func (p *Pipeline) Output(name string, f OutputPlugin) {
+	// TODO: this is where we associate a name with an output
+	p.outputs = append(p.outputs, NamedEntity[OutputPlugin]{
+		name:  name,
+		value: f,
+	})
 }
 
 func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan Event) {
-	// set up channels between each stage of the filter pipeline
+	// set up channels between each stage of the filter Pipeline
 	allChannels := make([]chan Event, 0)
 	allChannels = append(allChannels, origin)
 	for i := 0; i < len(filters); i++ {
 		allChannels = append(allChannels, make(chan Event, 2))
 	}
 
-	// set up goroutines to pump each stage of the pipeline
+	// set up goroutines to pump each stage of the Pipeline
 	for i, f := range filters {
 		filterIn := allChannels[i]
 		filterOut := allChannels[i+1]
@@ -127,10 +226,10 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 				select {
 				case inEvt := <-filterIn:
 					outEvt := inEvt.Copy()
-					err := filter.Run(outEvt, filterOut)
+					err := filter(outEvt, filterOut)
 					if err != nil {
-						// TODO: add pipeline name
-						slog.Error(fmt.Sprintf("error from filter[%s]: %s", filter.Name, err.Error()))
+						// TODO: add Pipeline name
+						slog.Error(fmt.Sprintf("error from filter[%s]: %s", "?", err.Error()))
 					}
 				}
 			}
@@ -141,9 +240,6 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 			select {
 			case inEvt := <-allChannels[len(allChannels)-1]:
 				destination <- inEvt
-			case <-time.After(60 * time.Second):
-				// TODO: add pipeline name
-				slog.Debug("no output from filter chain after 60 seconds")
 			}
 		}
 	}()

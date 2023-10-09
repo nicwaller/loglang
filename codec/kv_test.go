@@ -8,7 +8,7 @@ import (
 func TestKvEncodeSingleString(t *testing.T) {
 	evt := loglang.NewEvent()
 	evt.Field("fruit").SetString("apple")
-	dat, err := kvEncode(evt)
+	dat, err := Kv().Encode(evt)
 	if err != nil {
 		t.Error(err)
 	}
@@ -18,7 +18,7 @@ func TestKvEncodeSingleString(t *testing.T) {
 }
 
 func TestKvDecodeSingleString(t *testing.T) {
-	evt, err := kvDecode([]byte(`fruit="apple"`))
+	evt, err := Kv().Decode([]byte(`fruit="apple"`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -35,7 +35,7 @@ func TestKvEncodeMultiString(t *testing.T) {
 	evt.Field("colour").SetString("red")
 	evt.Field("fruit").SetString("apple")
 	evt.Field("peeled").SetString("false")
-	dat, err := kvEncode(evt)
+	dat, err := Kv().Encode(evt)
 	if err != nil {
 		t.Error(err)
 	}
@@ -45,7 +45,7 @@ func TestKvEncodeMultiString(t *testing.T) {
 }
 
 func TestKvDecodeMultiString(t *testing.T) {
-	evt, err := kvDecode([]byte(`fruit="apple" fav="banana"`))
+	evt, err := Kv().Decode([]byte(`fruit="apple" fav="banana"`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -60,7 +60,7 @@ func TestKvDecodeMultiString(t *testing.T) {
 func TestKvEncodeSingleNumber(t *testing.T) {
 	evt := loglang.NewEvent()
 	evt.Field("age").SetInt(25)
-	dat, err := kvEncode(evt)
+	dat, err := Kv().Encode(evt)
 	if err != nil {
 		t.Error(err)
 	}
@@ -70,7 +70,7 @@ func TestKvEncodeSingleNumber(t *testing.T) {
 }
 
 func TestKvDecodeSingleNumber(t *testing.T) {
-	evt, err := kvDecode([]byte(`age=25`))
+	evt, err := Kv().Decode([]byte(`age=25`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -85,7 +85,7 @@ func TestKvEncodeMultiNumber(t *testing.T) {
 	evt.Field("high").SetInt(77)
 	evt.Field("low").SetInt(12)
 	evt.Field("mid").SetInt(44)
-	dat, err := kvEncode(evt)
+	dat, err := Kv().Encode(evt)
 	if err != nil {
 		t.Error(err)
 	}
@@ -96,7 +96,7 @@ func TestKvEncodeMultiNumber(t *testing.T) {
 }
 
 func TestKvDecodeMultiNumber(t *testing.T) {
-	evt, err := kvDecode([]byte(`age=25 height=184`))
+	evt, err := Kv().Decode([]byte(`age=25 height=184`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -109,7 +109,7 @@ func TestKvDecodeMultiNumber(t *testing.T) {
 }
 
 func TestKvDecodeExtraWhitespace(t *testing.T) {
-	evt, err := kvDecode([]byte(`  age=25  `))
+	evt, err := Kv().Decode([]byte(`  age=25  `))
 	if err != nil {
 		t.Error(err)
 	}
@@ -119,7 +119,7 @@ func TestKvDecodeExtraWhitespace(t *testing.T) {
 }
 
 func TestKvDecodeUnquotedString(t *testing.T) {
-	evt, err := kvDecode([]byte(`fruit=apple`))
+	evt, err := Kv().Decode([]byte(`fruit=apple`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -129,7 +129,7 @@ func TestKvDecodeUnquotedString(t *testing.T) {
 }
 
 func TestKvDecodeEscaping(t *testing.T) {
-	evt, err := kvDecode([]byte(`msg="test\""`))
+	evt, err := Kv().Decode([]byte(`msg="test\""`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -139,7 +139,7 @@ func TestKvDecodeEscaping(t *testing.T) {
 }
 
 func TestKvDecodeBareString(t *testing.T) {
-	evt, err := kvDecode([]byte(`hello`))
+	evt, err := Kv().Decode([]byte(`hello`))
 	if err != nil {
 		t.Error(err)
 	}
@@ -154,11 +154,11 @@ func TestKvDecodeBareString(t *testing.T) {
 //	t.Skip("perfect fidelity is not guaranteed because we tolerate unquoted strings on input, but we always output quoted strings.")
 //	origStr := "fruit=apple age=25"
 //	origBytes := []byte(origStr)
-//	evt, err := kvDecode(origBytes)
+//	evt, err := Kv().Decode(origBytes)
 //	if err != nil {
 //		t.Error(err)
 //	}
-//	finalBytes, err := kvEncode(evt)
+//	finalBytes, err := Kv().Encode(evt)
 //	if err != nil {
 //		t.Error(err)
 //	}

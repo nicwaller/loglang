@@ -145,7 +145,7 @@ func (fld *Field) GetString() string {
 		return strconv.Itoa(v)
 	case float64:
 		// TODO: there's a better way
-		return fmt.Sprintf("%f", v)
+		return fmt.Sprintf("%filterChain", v)
 	case bool:
 		return fmt.Sprintf("%t", v)
 	default:

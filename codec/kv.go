@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+func Kv() loglang.CodecPlugin {
+	return &kvCodec{}
+}
+
+type kvCodec struct{}
+
 // simple key/value pairs on a single line
 // example:
 //
@@ -18,20 +24,13 @@ import (
 //     https://www.elastic.co/guide/en/logstash/current/plugins-filters-kv.html
 //   - Fluentd/Fluentbit calls this "logfmt"
 //     https://docs.fluentbit.io/manual/pipeline/parsers/logfmt
-func Kv() loglang.CodecPlugin {
-	return loglang.CodecPlugin{
-		Name:   "",
-		Encode: kvEncode,
-		Decode: kvDecode,
-	}
-}
 
 // TODO: have an option for flat or deep encoding decoding
 // TODO: support encoding/decoding nested maps
 // TODO: probably should be using this library: https://pkg.go.dev/github.com/kr/logfmt?utm_source=godoc
 // TODO: support other delimiters
 
-func kvEncode(evt loglang.Event) ([]byte, error) {
+func (p *kvCodec) Encode(evt loglang.Event) ([]byte, error) {
 	var sb strings.Builder
 	evt.TraverseFields(func(field loglang.Field) {
 		// FIXME: ignoring errors, oooh dangerous
@@ -59,7 +58,7 @@ func kvEncode(evt loglang.Event) ([]byte, error) {
 	return []byte(sb.String()), nil
 }
 
-func kvDecode(dat []byte) (loglang.Event, error) {
+func (p *kvCodec) Decode(dat []byte) (loglang.Event, error) {
 	evt := loglang.NewEvent()
 	// FIXME: this parser is very bad
 	for _, field := range bytes.Split(dat, []byte{' '}) {

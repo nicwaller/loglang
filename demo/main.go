@@ -4,7 +4,6 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
-	"github.com/nicwaller/loglang/framing"
 	"github.com/nicwaller/loglang/input"
 	"github.com/nicwaller/loglang/output"
 	"log/slog"
@@ -15,64 +14,26 @@ import (
 func main() {
 	setupLogging()
 
-	pipeline := loglang.NewPipeline()
-	//pipeline.Name = "demo"
+	p := loglang.NewPipeline("demo", loglang.PipelineOptions{})
 
-	inputs := []loglang.InputPlugin{
-		//input.Generator(input.GeneratorOptions{
-		//	Interval: 5 * time.Second,
-		//}),
-		input.UdpListener("udptest", "udp", 9999, framing.Whole(), codec.Kv()),
-		//input.TcpListener("tcptest", "tcp", 9998, framing.Whole(), codec.Plain("message")),
-		//input.GelfUDP(9997),
+	//p.Input("heartbeat", input.Generator(input.GeneratorOptions{Interval: time.Second}))
+	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
+	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
+	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
+	p.Output("stdout/json", output.StdOut(output.StdoutOptions{
+		Codec: codec.Json(),
+	}))
+
+	if err := p.Run(); err != nil {
+		slog.Error(err.Error())
 	}
-
-	//slackOut := output.Slack(output.SlackOptions{
-	//	BotToken: os.Getenv("BOT_TOKEN"),
-	//	Channel:  "test-3",
-	//})
-	//slackOut.Condition = func(event loglang.Event) bool {
-	//	return event.Field("type").GetString() == "slack"
-	//}
-
-	outputs := []loglang.OutputPlugin{
-		output.StdOut(codec.Kv()),
-		//slackOut,
-	}
-
-	//pipeline.Add(loglang.FilterPlugin{
-	//	Name: "noop",
-	//	Run: func(event loglang.Event, send chan<- loglang.Event) error {
-	//		// send the original event
-	//		send <- event
-	//		// sometimes inject another event for Slack
-	//		//count := event.Field("count").GetInt()
-	//		//if count%2 == 0 && count >= 2 {
-	//		//	send <- loglang.Event{Fields: map[string]any{
-	//		//		"type":    "slack",
-	//		//		"message": fmt.Sprintf("Count (%d) is even", count),
-	//		//	}}
-	//		//}
-	//		return nil
-	//	},
-	//})
-
-	//pipeline.Add(filter.Json("test1", "message"))
-	//pipeline.Add(filter.Rename("?", "msg", "message"))
-
-	_ = pipeline.Run(inputs, outputs)
 }
 
 func setupLogging() {
-	w := os.Stderr
-
-	// create a new logger
-	//logger := slog.New(tint.NewHandler(w, nil))
-
-	// set global logger with custom options
 	slog.SetDefault(slog.New(
-		tint.NewHandler(w, &tint.Options{
-			Level:      slog.LevelDebug,
+		tint.NewHandler(os.Stderr, &tint.Options{
+			//Level: slog.LevelDebug,
+			Level:      slog.LevelInfo,
 			TimeFormat: time.Kitchen,
 		}),
 	))

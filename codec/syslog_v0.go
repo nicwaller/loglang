@@ -16,51 +16,47 @@ import (
 // Syslog V1
 // https://datatracker.ietf.org/doc/html/rfc5424
 
+//goland:noinspection GoUnusedExportedFunction
 func SyslogV0() loglang.CodecPlugin {
-	return loglang.CodecPlugin{
-		Encode: func(evt loglang.Event) ([]byte, error) {
-			buf := bytes.NewBufferString("")
+	return &syslogV0{}
+}
 
-			// PART 1 - PRI
-			// TODO: maybe also look at [level]? coalesce?
-			facility := int8(1) // user-level
-			// TODO: read from [log][syslog][facility][code]
-			severityStr := loglang.Coalesce(
-				evt.Field("log.level").GetString(),
-				evt.Field("level").GetString(),
-			).(string)
-			severityStr = strings.ToLower(severityStr)
-			severity, _ := syslogSeverityReverse[severityStr]
-			priority := syslogPriority(facility, severity)
-			buf.WriteString(fmt.Sprintf("<%d>", priority))
+type syslogV0 struct{}
 
-			// PART 2 - HEADER
-			buf.WriteString(syslogHeader())
+func (p *syslogV0) Encode(event loglang.Event) ([]byte, error) {
+	buf := bytes.NewBufferString("")
 
-			// PART 3 - MESSAGE
-			tag := "" // is there a best field for tag?
-			content := evt.Field("message").GetString()
-			buf.WriteString(syslogMessage(tag, content))
+	// PART 1 - PRI
+	// TODO: maybe also look at [level]? coalesce?
+	facility := int8(1) // user-level
+	// TODO: read from [log][syslog][facility][code]
+	severityStr := loglang.Coalesce(
+		event.Field("log.level").GetString(),
+		event.Field("level").GetString(),
+	).(string)
+	severityStr = strings.ToLower(severityStr)
+	severity, _ := syslogSeverityReverse[severityStr]
+	priority := syslogPriority(facility, severity)
+	buf.WriteString(fmt.Sprintf("<%d>", priority))
 
-			// total length of packet must be 1024 or less
-			// relay MUST truncate the packet to be 1024 bytes
-			leng := min(buf.Len(), 1024)
-			return buf.Bytes()[:leng], nil
-		},
-		Decode: func(bytes []byte) (loglang.Event, error) {
-			panic("I hate this format")
-			// use this in decoding
-			// facilityName := syslogFacility[facility]
-			// log.syslog.hostname
-			// log.syslog.facility.name
-			// log.syslog.priority
-			// log.syslog.severity.code
-			// log.syslog.severity.name
-			// log.syslog.version
-			// https://www.elastic.co/guide/en/ecs/master/ecs-log.html
-			return loglang.NewEvent(), fmt.Errorf("not yet implemented")
-		},
-	}
+	// PART 2 - HEADER
+	buf.WriteString(syslogHeader())
+
+	// PART 3 - MESSAGE
+	tag := "" // is there a best field for tag?
+	content := event.Field("message").GetString()
+	buf.WriteString(syslogMessage(tag, content))
+
+	// total length of packet must be 1024 or less
+	// relay MUST truncate the packet to be 1024 bytes
+	leng := min(buf.Len(), 1024)
+	return buf.Bytes()[:leng], nil
+
+}
+
+func (p *syslogV0) Decode(_ []byte) (loglang.Event, error) {
+	panic("I hate this format")
+
 }
 
 // The Priority value is calculated by first multiplying the Facility

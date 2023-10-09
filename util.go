@@ -1,5 +1,13 @@
 package loglang
 
+func Map[I any, O any](mapper func(I) O, orig []I) []O {
+	changed := make([]O, 0, len(orig))
+	for _, v := range orig {
+		changed = append(changed, mapper(v))
+	}
+	return changed
+}
+
 func Coalesce(args ...any) any {
 	for _, v := range args {
 		if v != nil {
@@ -14,4 +22,9 @@ func Coalesce(args ...any) any {
 		}
 	}
 	return nil
+}
+
+type NamedEntity[T any] struct {
+	value T
+	name  string
 }
