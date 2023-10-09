@@ -2,11 +2,11 @@ package main
 
 import (
 	"github.com/lmittmann/tint"
+	"github.com/nicwaller/loglang"
+	"github.com/nicwaller/loglang/codec"
+	"github.com/nicwaller/loglang/input"
+	"github.com/nicwaller/loglang/output"
 	"log/slog"
-	"loglang/loglang"
-	"loglang/loglang/codec"
-	"loglang/loglang/input"
-	"loglang/loglang/output"
 	"os"
 	"time"
 )

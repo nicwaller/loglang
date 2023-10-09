@@ -1,7 +1,7 @@
 package codec
 
 import (
-	"loglang/loglang"
+	"github.com/nicwaller/loglang"
 	"testing"
 )
 

@@ -3,12 +3,10 @@ package filter
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/nicwaller/loglang"
 	"log/slog"
-	"loglang/loglang"
 	"strings"
 )
-
-var x loglang.FilterPlugin
 
 // JSON filter doesn't make sense...?
 func Json(name string, sourceField string) loglang.FilterPlugin {

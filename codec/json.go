@@ -2,7 +2,7 @@ package codec
 
 import (
 	"encoding/json"
-	"loglang/loglang"
+	"github.com/nicwaller/loglang"
 )
 
 func Json() loglang.CodecPlugin {

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/nicwaller/loglang"
 	"io"
 	"log/slog"
-	"loglang/loglang"
 	"net/http"
 	"time"
 )

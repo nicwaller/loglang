@@ -1,6 +1,8 @@
 package filter
 
-import "loglang/loglang"
+import (
+	"github.com/nicwaller/loglang"
+)
 
 // Replace the value of a field with a new value, or add the field if it doesn’t already exist.
 func Replace(name, field string, content string) loglang.FilterPlugin {

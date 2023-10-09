@@ -1,7 +1,7 @@
 package output
 
 import (
-	"loglang/loglang"
+	"github.com/nicwaller/loglang"
 	"os"
 )
 

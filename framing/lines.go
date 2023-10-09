@@ -2,8 +2,8 @@ package framing
 
 import (
 	"bufio"
+	"github.com/nicwaller/loglang"
 	"io"
-	"loglang/loglang"
 )
 
 func Lines() loglang.FramingPlugin {

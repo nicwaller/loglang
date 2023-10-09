@@ -1,8 +1,8 @@
 package framing
 
 import (
+	"github.com/nicwaller/loglang"
 	"io"
-	"loglang/loglang"
 )
 
 // Reads as much as possible and treats it as a single message

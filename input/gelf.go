@@ -1,11 +1,11 @@
 package input
 
 import (
+	"github.com/nicwaller/loglang"
+	"github.com/nicwaller/loglang/codec"
+	"github.com/nicwaller/loglang/filter"
+	"github.com/nicwaller/loglang/framing"
 	"log/slog"
-	"loglang/loglang"
-	"loglang/loglang/codec"
-	"loglang/loglang/filter"
-	"loglang/loglang/framing"
 )
 
 // GELF: Graylog Extended Log Format

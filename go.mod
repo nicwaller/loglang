@@ -1,4 +1,4 @@
-module loglang
+module github.com/nicwaller/loglang
 
 go 1.21
 

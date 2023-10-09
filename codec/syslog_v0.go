@@ -3,7 +3,7 @@ package codec
 import (
 	"bytes"
 	"fmt"
-	"loglang/loglang"
+	"github.com/nicwaller/loglang"
 	"os"
 	"strings"
 	"time"

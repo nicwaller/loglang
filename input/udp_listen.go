@@ -3,8 +3,8 @@ package input
 import (
 	"bytes"
 	"fmt"
+	"github.com/nicwaller/loglang"
 	"log/slog"
-	"loglang/loglang"
 	"net"
 	"time"
 )

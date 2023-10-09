@@ -2,8 +2,8 @@ package codec
 
 import (
 	"bytes"
+	"github.com/nicwaller/loglang"
 	"log/slog"
-	"loglang/loglang"
 	"strconv"
 	"strings"
 )

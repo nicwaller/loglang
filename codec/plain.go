@@ -1,8 +1,8 @@
 package codec
 
 import (
+	"github.com/nicwaller/loglang"
 	"log/slog"
-	"loglang/loglang"
 )
 
 func Plain(fieldname string) loglang.CodecPlugin {
