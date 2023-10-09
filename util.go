@@ -34,6 +34,6 @@ func Coalesce(args ...any) any {
 }
 
 type NamedEntity[T any] struct {
-	value T
-	name  string
+	Value T
+	Name  string
 }

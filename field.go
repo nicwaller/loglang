@@ -84,7 +84,7 @@ func (fld *Field) set(value any, overwrite bool) error {
 			} else {
 				// damn
 				slog.Warn(strings.Join(fld.Path[:i+1], ".") + " is getting implicitly overwritten; make sure to delete it first")
-				// do we want to preserve the original value like this?
+				// do we want to preserve the original Value like this?
 				// level["_"+key] = level[key]
 				level[key] = make(map[string]any)
 			}

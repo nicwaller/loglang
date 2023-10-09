@@ -25,6 +25,11 @@ func main() {
 	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
 
+	p.Filter("delay", func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
+		time.Sleep(400 * time.Millisecond)
+		return nil
+	})
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
@@ -44,7 +49,7 @@ func main() {
 func setupLogging() {
 	slog.SetDefault(slog.New(
 		tint.NewHandler(os.Stderr, &tint.Options{
-			//Level:      slog.LevelDebug,
+			//Level: slog.LevelDebug,
 			Level:      slog.LevelInfo,
 			TimeFormat: time.Kitchen,
 		}),

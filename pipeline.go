@@ -18,6 +18,12 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	if options.StalledInputThreshold == 0 {
 		options.StalledInputThreshold = 24 * time.Hour
 	}
+	if options.SlowBatchWarning == 0 {
+		options.SlowBatchWarning = 5 * time.Second
+	}
+	if options.BatchTimeout == 0 {
+		options.BatchTimeout = time.Minute
+	}
 	var p Pipeline
 	p.opts = options
 	p.Name = name
@@ -60,11 +66,13 @@ type PipelineOptions struct {
 	StalledOutputThreshold time.Duration
 	MarkIngestionTime      bool
 	Schema                 SchemaModel
+	SlowBatchWarning       time.Duration
+	BatchTimeout           time.Duration
 }
 
 type inputDetail struct {
 	plugin      InputPlugin
-	filterChain []FilterPlugin
+	filterChain []NamedEntity[FilterPlugin]
 }
 
 func (p *Pipeline) GetName() string {
@@ -92,10 +100,7 @@ func (p *Pipeline) Run() error {
 	// set up filters first, then outputs, then inputs LAST!
 
 	log.Debug("preparing filter chain")
-	filters := Map(func(t NamedEntity[FilterPlugin]) FilterPlugin {
-		return t.value
-	}, p.filters)
-	RunFilterChain(ctx, filters, combinedInputs, outChan)
+	RunFilterChain(ctx, p.filters, combinedInputs, outChan, true)
 	log.Info(fmt.Sprintf("set up %d filters", len(p.filters)))
 
 	if err := p.runOutputs(ctx, outChan); err != nil {
@@ -127,32 +132,86 @@ func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) err
 	log.Debug("starting inputs")
 
 	for _, entity := range p.inputs {
-		plugin := entity.value.plugin
+		plugin := entity.Value.plugin
+		pluginName := entity.Name
 
 		log := slog.Default()
 		log = log.With("pipeline", p.GetName())
-		log = log.With("plugin", entity.name)
+		log = log.With("plugin", entity.Name)
 
 		inChan := make(chan Event, ChanBufferSize)
 
-		RunFilterChain(ctx, entity.value.filterChain, inChan, combinedInputs)
+		RunFilterChain(ctx, entity.Value.filterChain, inChan, combinedInputs, false)
 
 		log.Info("starting input")
 		go func() {
-			err := plugin.Run(ctx, func(events ...Event) BatchResult {
-				// TODO: prepare a batch
+			pluginContext := context.WithValue(ctx, "plugin", pluginName)
+			err := plugin.Run(pluginContext, func(events ...Event) BatchResult {
+				fanout := len(events)
+				pendingFilter := fanout
+				pendingOutput := fanout * len(p.outputs)
+				filterBurndown := make(chan bool)
+				outputBurndown := make(chan bool)
+				dropChan := make(chan bool)
+				filterErrors := make(chan error)
 				for _, event := range events {
+					event.filterBurndown = filterBurndown
+					event.outputBurndown = outputBurndown
+					event.dropChan = dropChan
+					event.filterErrors = filterErrors
 					inChan <- event
 				}
-				// TODO: wait for outputs to populate batch result
-				return BatchResult{
+				done := make(chan bool)
+
+				result := BatchResult{
+					TotalCount:   fanout,
 					DropCount:    0,
 					ErrorCount:   0,
-					SuccessCount: len(events),
+					SuccessCount: 0,
 					Ok:           true,
-					Start:        time.Now(),
-					Finish:       time.Now(),
+					Errors:       make([]error, 0),
 				}
+
+				result.Start = time.Now()
+				go func() {
+					// TODO: customize this in pipeline options
+					slowBatchWarning := time.After(p.opts.SlowBatchWarning)
+					batchDeadline := time.After(p.opts.BatchTimeout)
+					for pendingFilter > 0 || pendingOutput > 0 {
+						select {
+						case <-filterBurndown:
+							pendingFilter -= 1
+						case <-outputBurndown:
+							pendingOutput -= 1
+							// TODO: how do I increment success count? how do I know an event was published to all filters?
+						case <-dropChan:
+							pendingFilter -= 1
+							pendingOutput -= fanout
+							result.DropCount++
+						case err := <-filterErrors:
+							//result.Ok = false
+							result.ErrorCount += 1
+							result.Errors = append(result.Errors, err)
+						case <-slowBatchWarning:
+							log.Warn("batch is taking longer than expected")
+						case <-batchDeadline:
+							log.Error(fmt.Sprintf("batch timed out after %v", p.opts.BatchTimeout))
+							result.Ok = false
+							done <- true
+							return
+						}
+					}
+					done <- true
+				}()
+
+				// wait for batch to complete, either successfully or not
+				select {
+				case <-done:
+					break
+				}
+				result.Finish = time.Now()
+
+				return result
 			})
 			if err == nil {
 				log.Info("input stopped")
@@ -213,9 +272,10 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
 	for i, namedOutput := range p.outputs {
 		log := slog.Default()
 		log = log.With("pipeline", p.GetName())
-		log = log.With("plugin", namedOutput.name)
+		log = log.With("plugin", namedOutput.Name)
 
-		output := namedOutput.value
+		output := namedOutput.Value
+		outputName := namedOutput.Name
 		soloChan := outputChannels[i]
 
 		log.Info("starting output")
@@ -226,7 +286,10 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
 				case outEvt := <-soloChan:
 					err := output.Run(ctx, outEvt)
 					if err != nil {
-						log.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
+						log.Error(fmt.Sprintf("output[%s] failed: %s", outputName, err.Error()))
+						outEvt.filterErrors <- err
+					} else {
+						outEvt.outputBurndown <- true
 					}
 				case <-ctx.Done():
 					break outputPump
@@ -237,10 +300,10 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
 	return nil
 }
 
-func (p *Pipeline) Input(name string, plugin InputPlugin, filters ...FilterPlugin) {
+func (p *Pipeline) Input(name string, plugin InputPlugin, filters ...NamedEntity[FilterPlugin]) {
 	p.inputs = append(p.inputs, NamedEntity[inputDetail]{
-		name: name,
-		value: inputDetail{
+		Name: name,
+		Value: inputDetail{
 			plugin:      plugin,
 			filterChain: filters,
 		},
@@ -248,22 +311,22 @@ func (p *Pipeline) Input(name string, plugin InputPlugin, filters ...FilterPlugi
 }
 
 func (p *Pipeline) Filter(name string, f FilterPlugin) {
-	// TODO: this is where we associate a name with a filter
+	// TODO: this is where we associate a Name with a filter
 	p.filters = append(p.filters, NamedEntity[FilterPlugin]{
-		name:  name,
-		value: f,
+		Name:  name,
+		Value: f,
 	})
 }
 
 func (p *Pipeline) Output(name string, f OutputPlugin) {
-	// TODO: this is where we associate a name with an output
+	// TODO: this is where we associate a Name with an output
 	p.outputs = append(p.outputs, NamedEntity[OutputPlugin]{
-		name:  name,
-		value: f,
+		Name:  name,
+		Value: f,
 	})
 }
 
-func RunFilterChain(ctx context.Context, filters []FilterPlugin, origin chan Event, destination chan Event) {
+func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], origin chan Event, destination chan Event, ack bool) {
 	log := slog.Default()
 	log = log.With("pipeline", ctx.Value("pipeline"))
 
@@ -275,10 +338,11 @@ func RunFilterChain(ctx context.Context, filters []FilterPlugin, origin chan Eve
 	}
 
 	// set up goroutines to pump each stage of the Pipeline
-	for i, f := range filters {
+	for i, entity := range filters {
 		filterIn := allChannels[i]
 		filterOut := allChannels[i+1]
-		filter := f // intermediate variable for goroutine
+		filterName := entity.Name
+		filterFunc := entity.Value // intermediate variable for goroutine
 		//index := i  // intermediate variable for goroutine
 		go func() {
 		filterPump:
@@ -293,16 +357,22 @@ func RunFilterChain(ctx context.Context, filters []FilterPlugin, origin chan Eve
 							dropped = true
 						}
 					}
-					err := filter(&event, filterOut, dropFunc)
+					err := filterFunc(&event, filterOut, dropFunc)
 					if err != nil {
-						// TODO: add Pipeline name
-						// TODO: increment an error counter
-						slog.Error(fmt.Sprintf("error from filter[%s]: %s", "?", err.Error()))
+						event.filterErrors <- err
+						log.Warn("filter error",
+							"error", err,
+							"filter", filterName,
+						)
+						// TODO: should events continue down the pipeline if a single filter stage fails?
 						filterOut <- event
 					} else if dropped {
-						// TODO: increment a drop counter
 						// do not pass to next stage of filter pipeline
+						if ack {
+							event.dropChan <- true
+						}
 					} else {
+						event.filterBurndown <- true
 						filterOut <- event
 					}
 				case <-ctx.Done():

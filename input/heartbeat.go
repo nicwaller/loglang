@@ -51,7 +51,9 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 		hostname = "loglang"
 	}
 	opts := p.opts
+	var lastDuration time.Duration
 	for count := 0; running; count++ {
+		nextHeartbeat := time.After(opts.Interval)
 		evt := loglang.NewEvent()
 		switch schema {
 		case loglang.SchemaECS:
@@ -59,6 +61,9 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 			evt.Field("event", "module").SetString("loglang")
 			evt.Field("event", "dataset").SetString("heartbeat")
 			evt.Field("event", "sequence").SetInt(count)
+			if lastDuration > 0 {
+				evt.Field("event", "duration").SetInt(int(lastDuration))
+			}
 		case loglang.SchemaLogstashFlat:
 			evt.Field("host").SetString(hostname)
 			evt.Field("clock").SetInt(count)
@@ -72,11 +77,23 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 			evt.Field("dataset").SetString("heartbeat")
 			evt.Field("sequence").SetInt(count)
 		}
+		log.Debug("sending heartbeat")
+		// heartbeats can be slowed down by the filter pipeline
+		// it's possible to send heartbeats faster by wrapping this in a goroutine
+		// but that just masks the fact that heartbeats SHOULD be fast
+		// don't worry about lost heartbeats
+		// the pipeline will generate errors if batches time out
 		result := send(evt)
 		if !result.Ok {
-			log.With("error", result.Summary()).Error("heartbeat failed")
+			log.
+				With("error", result.Summary()).
+				Error("heartbeat failed")
 		}
-		time.Sleep(opts.Interval)
+		lastDuration = result.Finish.Sub(result.Start)
+		select {
+		case <-nextHeartbeat:
+			break
+		}
 	}
 
 	log.Debug("stopped generator")

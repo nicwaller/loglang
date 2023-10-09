@@ -25,12 +25,12 @@ type BatchResult struct {
 }
 
 func (r *BatchResult) Summary() string {
-	return fmt.Sprintf("Ok=%b TotalCount=%d SuccessCount=%d DropCount=%d ErrorCount=%d",
+	return fmt.Sprintf("Ok=%t TotalCount=%d SuccessCount=%d DropCount=%d ErrorCount=%d",
 		r.Ok, r.TotalCount, r.SuccessCount, r.DropCount, r.ErrorCount)
 }
 
 type OutputPlugin interface {
-	// TODO: Run() needs a better name or purpose
+	// TODO: Run() needs a better Name or purpose
 	Run(context.Context, Event) error
 }
 

@@ -9,6 +9,10 @@ type Event struct {
 	// Start with strings, maybe other types later
 	Fields map[string]interface{}
 	//touchOrder []string
+	filterBurndown chan bool
+	outputBurndown chan bool
+	filterErrors   chan error
+	dropChan       chan bool
 }
 
 func NewEvent() Event {
@@ -21,7 +25,7 @@ func NewEvent() Event {
 func (evt *Event) Field(path ...string) *Field {
 	// warning: don't try to be clever and split the path components
 	//on "." to get smaller path components. It must be possible to
-	//specify fields that contain a "." in the name!
+	//specify fields that contain a "." in the Name!
 	//
 	// no need to verify that the field currently exists
 	// because we can also use this for setting values
