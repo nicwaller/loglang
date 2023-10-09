@@ -5,7 +5,7 @@ import (
 )
 
 // Replace the value of a field with a new value, or add the field if it doesn’t already exist.
-func Replace(name, field string, content string) loglang.FilterPlugin {
+func Replace(field string, content string) loglang.FilterPlugin {
 	return func(event loglang.Event, send chan<- loglang.Event) error {
 		event.Field(field).SetString(content)
 		send <- event
@@ -13,7 +13,7 @@ func Replace(name, field string, content string) loglang.FilterPlugin {
 	}
 }
 
-func Remove(name string, field string) loglang.FilterPlugin {
+func Remove(field string) loglang.FilterPlugin {
 	return func(event loglang.Event, send chan<- loglang.Event) error {
 		event.Field(field).Delete()
 		send <- event
@@ -22,7 +22,7 @@ func Remove(name string, field string) loglang.FilterPlugin {
 }
 
 // FIXME: rename doesn't support deep fields
-func Rename(name string, oldField string, newField string) loglang.FilterPlugin {
+func Rename(oldField string, newField string) loglang.FilterPlugin {
 	return func(event loglang.Event, send chan<- loglang.Event) error {
 		oldF := event.Field(oldField)
 		newF := event.Field(newField)
