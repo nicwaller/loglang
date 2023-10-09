@@ -38,7 +38,7 @@ type UdpListenerOptions struct {
 	Schema  loglang.SchemaModel
 }
 
-func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error {
+func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 	log := slog.Default().With(
 		"pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"),
@@ -120,7 +120,7 @@ func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error 
 					if err != nil {
 						slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())
 					} else {
-						events <- evt
+						send(evt)
 					}
 				case <-time.After(30 * time.Second):
 					return

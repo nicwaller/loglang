@@ -26,7 +26,7 @@ type TcpListenerOptions struct {
 	Codec   loglang.CodecPlugin
 }
 
-func (p *tcpListener) Run(ctx context.Context, send chan loglang.Event) error {
+func (p *tcpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 	log := slog.Default().With(
 		"pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"),
@@ -59,7 +59,7 @@ func (p *tcpListener) Run(ctx context.Context, send chan loglang.Event) error {
 }
 
 // TODO: practice with "lines" framing
-func tcpReading(ctx context.Context, conn net.Conn, send chan loglang.Event, framer loglang.FramingPlugin, codec loglang.CodecPlugin) {
+func tcpReading(ctx context.Context, conn net.Conn, send loglang.BatchSender, framer loglang.FramingPlugin, codec loglang.CodecPlugin) {
 	frames := make(chan []byte)
 	go func() {
 		slog.Debug("starting framer")
@@ -78,7 +78,7 @@ func tcpReading(ctx context.Context, conn net.Conn, send chan loglang.Event, fra
 				if err != nil {
 					slog.Error(err.Error())
 				} else {
-					send <- evt
+					send(evt)
 				}
 			case <-time.After(30 * time.Second):
 				return

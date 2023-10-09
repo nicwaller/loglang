@@ -5,8 +5,8 @@ import (
 )
 
 type Event struct {
-	// start with flat, maybe add hierarchy later
-	// start with strings, maybe other types later
+	// Start with flat, maybe add hierarchy later
+	// Start with strings, maybe other types later
 	Fields map[string]interface{}
 	//touchOrder []string
 }

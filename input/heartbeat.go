@@ -27,7 +27,7 @@ type HeartbeatOptions struct {
 	Schema   loglang.SchemaModel
 }
 
-func (p *generator) Run(ctx context.Context, events chan loglang.Event) error {
+func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 	running := true
 	go func() {
 		select {
@@ -72,7 +72,10 @@ func (p *generator) Run(ctx context.Context, events chan loglang.Event) error {
 			evt.Field("dataset").SetString("heartbeat")
 			evt.Field("sequence").SetInt(count)
 		}
-		events <- evt
+		result := send(evt)
+		if !result.Ok {
+			log.With("error", result.Summary()).Error("heartbeat failed")
+		}
 		time.Sleep(opts.Interval)
 	}
 

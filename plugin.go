@@ -2,11 +2,30 @@ package loglang
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"time"
 )
 
 type InputPlugin interface {
-	Run(context.Context, chan Event) error
+	Run(context.Context, BatchSender) error
+}
+
+type BatchSender func(...Event) BatchResult
+
+type BatchResult struct {
+	Total   int
+	Dropped int
+	Errors  int
+	Success int
+	Ok      bool
+	Start   time.Time
+	Finish  time.Time
+}
+
+func (r *BatchResult) Summary() string {
+	return fmt.Sprintf("Ok=%b Total=%d Success=%d Dropped=%d Errors=%d",
+		r.Ok, r.Total, r.Success, r.Dropped, r.Errors)
 }
 
 type OutputPlugin interface {

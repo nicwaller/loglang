@@ -139,7 +139,21 @@ func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) err
 
 		log.Info("starting input")
 		go func() {
-			err := plugin.Run(ctx, inChan)
+			err := plugin.Run(ctx, func(events ...Event) BatchResult {
+				// TODO: prepare a batch
+				for _, event := range events {
+					inChan <- event
+				}
+				// TODO: wait for outputs to populate batch result
+				return BatchResult{
+					Dropped: 0,
+					Errors:  0,
+					Success: len(events),
+					Ok:      true,
+					Start:   time.Now(),
+					Finish:  time.Now(),
+				}
+			})
 			if err == nil {
 				log.Info("input stopped")
 			} else {
