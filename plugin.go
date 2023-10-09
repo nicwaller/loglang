@@ -14,18 +14,19 @@ type InputPlugin interface {
 type BatchSender func(...Event) BatchResult
 
 type BatchResult struct {
-	Total   int
-	Dropped int
-	Errors  int
-	Success int
-	Ok      bool
-	Start   time.Time
-	Finish  time.Time
+	TotalCount   int
+	DropCount    int
+	ErrorCount   int
+	SuccessCount int
+	Ok           bool
+	Errors       []error
+	Start        time.Time
+	Finish       time.Time
 }
 
 func (r *BatchResult) Summary() string {
-	return fmt.Sprintf("Ok=%b Total=%d Success=%d Dropped=%d Errors=%d",
-		r.Ok, r.Total, r.Success, r.Dropped, r.Errors)
+	return fmt.Sprintf("Ok=%b TotalCount=%d SuccessCount=%d DropCount=%d ErrorCount=%d",
+		r.Ok, r.TotalCount, r.SuccessCount, r.DropCount, r.ErrorCount)
 }
 
 type OutputPlugin interface {

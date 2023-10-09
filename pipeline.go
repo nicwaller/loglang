@@ -146,12 +146,12 @@ func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) err
 				}
 				// TODO: wait for outputs to populate batch result
 				return BatchResult{
-					Dropped: 0,
-					Errors:  0,
-					Success: len(events),
-					Ok:      true,
-					Start:   time.Now(),
-					Finish:  time.Now(),
+					DropCount:    0,
+					ErrorCount:   0,
+					SuccessCount: len(events),
+					Ok:           true,
+					Start:        time.Now(),
+					Finish:       time.Now(),
 				}
 			})
 			if err == nil {
