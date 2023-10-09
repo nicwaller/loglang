@@ -14,7 +14,7 @@ type OutputPlugin interface {
 	Run(context.Context, Event) error
 }
 
-type FilterPlugin func(Event, chan<- Event) error
+type FilterPlugin func(event *Event, inject chan<- Event, drop func()) error
 
 type CodecPlugin interface {
 	Encode(Event) ([]byte, error)

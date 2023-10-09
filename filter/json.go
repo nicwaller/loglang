@@ -10,7 +10,7 @@ import (
 
 // JSON filter doesn't make sense...?
 func Json(name string, sourceField string) loglang.FilterPlugin {
-	return func(event loglang.Event, send chan<- loglang.Event) error {
+	return func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
 		source := event.Field(sourceField).GetString()
 		if !strings.HasPrefix(source, "{") ||
 			!strings.HasSuffix(source, "}") {
@@ -30,7 +30,6 @@ func Json(name string, sourceField string) loglang.FilterPlugin {
 				return fmt.Errorf("unhandled field type")
 			}
 		}
-		send <- event
 		return nil
 	}
 }

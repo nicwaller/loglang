@@ -22,9 +22,8 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	p.opts = options
 	p.Name = name
 
-	p.Filter("default @timestamp", func(event Event, events chan<- Event) error {
+	p.Filter("default @timestamp", func(event *Event, inject chan<- Event, drop func()) error {
 		event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
-		events <- event
 		return nil
 	})
 
@@ -37,10 +36,9 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 			f.Path = []string{"ingested"}
 		}
 
-		p.Filter("mark ingestion time", func(event Event, events chan<- Event) error {
-			f.original = &event
+		p.Filter("mark ingestion time", func(event *Event, events chan<- Event, drop func()) error {
+			f.original = event
 			f.Default(time.Now().Format(time.RFC3339))
-			events <- event
 			return nil
 		})
 	}
@@ -272,12 +270,26 @@ func RunFilterChain(ctx context.Context, filters []FilterPlugin, origin chan Eve
 		filterPump:
 			for {
 				select {
-				case inEvt := <-filterIn:
-					outEvt := inEvt.Copy()
-					err := filter(outEvt, filterOut)
+				case event := <-filterIn:
+					dropped := false
+					dropFunc := func() {
+						if dropped {
+							log.Warn("drop() should only be called once")
+						} else {
+							dropped = true
+						}
+					}
+					err := filter(&event, filterOut, dropFunc)
 					if err != nil {
 						// TODO: add Pipeline name
+						// TODO: increment an error counter
 						slog.Error(fmt.Sprintf("error from filter[%s]: %s", "?", err.Error()))
+						filterOut <- event
+					} else if dropped {
+						// TODO: increment a drop counter
+						// do not pass to next stage of filter pipeline
+					} else {
+						filterOut <- event
 					}
 				case <-ctx.Done():
 					break filterPump
