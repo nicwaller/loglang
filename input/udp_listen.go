@@ -2,6 +2,7 @@ package input
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
@@ -31,24 +32,36 @@ type udpListener struct {
 	port int
 }
 
-func (p *udpListener) Run(events chan loglang.Event) error {
+func (p *udpListener) Run(ctx context.Context, events chan loglang.Event) error {
 	log := slog.Default().With(
+		"pipeline", ctx.Value("pipeline"),
+		"plugin", ctx.Value("plugin"),
 		"server.port", strconv.Itoa(p.port),
 	)
-	log.Debug("listening")
+
+	running := true
+	go func() {
+		select {
+		case <-ctx.Done():
+			running = false
+		}
+	}()
+
 	addr := net.UDPAddr{
 		Port: p.port,
 		IP:   net.ParseIP("0.0.0.0"),
 	}
 	conn, err := net.ListenUDP("udp", &addr) // code does not block here
+	log.Debug("listening")
 	if err != nil {
+		log.Error(err.Error())
 		return err
 	}
 	defer func(conn *net.UDPConn) {
 		_ = conn.Close()
 	}(conn)
 
-	for {
+	for running {
 		var buf [4096]byte
 		// UDP is not stream based, so we read each individual datagram
 		rlen, addr, err := conn.ReadFromUDP(buf[:])
@@ -63,7 +76,7 @@ func (p *udpListener) Run(events chan loglang.Event) error {
 
 		frames := make(chan []byte)
 		go func() {
-			err := p.opts.Framing.Run(bytes.NewReader(buf[:rlen]), frames)
+			err := p.opts.Framing.Run(ctx, bytes.NewReader(buf[:rlen]), frames)
 			if err != nil {
 				slog.Error(err.Error())
 			}
@@ -93,6 +106,8 @@ func (p *udpListener) Run(events chan loglang.Event) error {
 			}
 		}()
 	}
+
+	return nil
 }
 
 type UdpListenerOptions struct {

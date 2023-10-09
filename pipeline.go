@@ -1,9 +1,8 @@
 package loglang
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"time"
 
 	"log/slog"
@@ -20,7 +19,12 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	p.opts = options
 	p.Name = name
 	p.Filter("default @timestamp", func(event Event, events chan<- Event) error {
-		event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
+		timeStr := time.Now().Format(time.RFC3339)
+		event.Field("@timestamp").Default(timeStr)
+		// ECS compatibility
+		if p.opts.MarkIngestionTime {
+			event.Field("event", "ingested").Default(timeStr)
+		}
 		events <- event
 		return nil
 	})
@@ -33,11 +37,13 @@ type Pipeline struct {
 	filters []NamedEntity[FilterPlugin]
 	outputs []NamedEntity[OutputPlugin]
 	opts    PipelineOptions
+	stop    context.CancelFunc
 }
 
 type PipelineOptions struct {
 	StalledInputThreshold  time.Duration
 	StalledOutputThreshold time.Duration
+	MarkIngestionTime      bool
 }
 
 type inputDetail struct {
@@ -54,9 +60,12 @@ const ChanBufferSize = 2
 // TODO: Inputs and Outputs should have codecs for converting between original and []byte
 
 func (p *Pipeline) Run() error {
+	ctx := context.Background()
+	ctx, p.stop = context.WithCancel(ctx)
+	ctx = context.WithValue(ctx, "pipeline", p.GetName())
 
 	log := slog.Default()
-	log = log.With("Pipeline", p.GetName())
+	log = log.With("pipeline", p.GetName())
 
 	// all inputs are multiplexed to a single input channel
 	combinedInputs := make(chan Event, ChanBufferSize)
@@ -69,46 +78,53 @@ func (p *Pipeline) Run() error {
 	filters := Map(func(t NamedEntity[FilterPlugin]) FilterPlugin {
 		return t.value
 	}, p.filters)
-	RunFilterChain(filters, combinedInputs, outChan)
+	RunFilterChain(ctx, filters, combinedInputs, outChan)
 	log.Info(fmt.Sprintf("set up %d filters", len(p.filters)))
 
-	log.Debug("starting outputs")
-	if err := p.runOutputs(outChan); err != nil {
+	if err := p.runOutputs(ctx, outChan); err != nil {
 		return err
 	}
 
-	log.Debug("starting inputs")
-	if err := p.runInputs(combinedInputs); err != nil {
+	if err := p.runInputs(ctx, combinedInputs); err != nil {
 		return err
 	}
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	for range c {
-		log.Info("Caught Ctrl-C SIGINT; exiting...")
-		// TODO: pause inputs, then wait for all Pipeline stages to finish.
-		break
+
+	select {
+	case <-ctx.Done():
+		log.Info("stopping pipeline")
 	}
 
 	return nil
 }
 
-func (p *Pipeline) runInputs(combinedInputs chan Event) error {
+func (p *Pipeline) Stop() {
+	log := slog.Default()
+	log = log.With("pipeline", p.GetName())
+
+	log.Info("pipeline stop requested")
+	p.stop()
+}
+
+func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) error {
+	log := slog.With("pipeline", ctx.Value("pipeline"))
+	log.Debug("starting inputs")
+
 	for _, entity := range p.inputs {
 		plugin := entity.value.plugin
 
 		log := slog.Default()
-		log = log.With("Pipeline", p.GetName())
+		log = log.With("pipeline", p.GetName())
 		log = log.With("plugin", entity.name)
 
 		inChan := make(chan Event, ChanBufferSize)
 
-		RunFilterChain(entity.value.filterChain, inChan, combinedInputs)
+		RunFilterChain(ctx, entity.value.filterChain, inChan, combinedInputs)
 
 		log.Info("starting input")
 		go func() {
-			err := plugin.Run(inChan)
+			err := plugin.Run(ctx, inChan)
 			if err == nil {
-				log.Warn("input exited")
+				log.Info("input stopped")
 			} else {
 				log.Error("input failed", "error", err)
 			}
@@ -117,7 +133,10 @@ func (p *Pipeline) runInputs(combinedInputs chan Event) error {
 	return nil
 }
 
-func (p *Pipeline) runOutputs(events chan Event) error {
+func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
+	log := slog.With("pipeline", ctx.Value("pipeline"))
+	log.Debug("starting outputs")
+
 	// set up an output channel for each output
 	outputChannels := make([]chan Event, len(p.outputs))
 	for i := 0; i < len(p.outputs); i++ {
@@ -141,7 +160,8 @@ func (p *Pipeline) runOutputs(events chan Event) error {
 	alertThreshold := p.opts.StalledOutputThreshold
 	go func() {
 		log := slog.Default()
-		log = log.With("Pipeline", p.GetName())
+		log = log.With("pipeline", p.GetName())
+	fanOut:
 		for {
 			select {
 			case event := <-events:
@@ -152,14 +172,16 @@ func (p *Pipeline) runOutputs(events chan Event) error {
 				// TODO: make this customizable? PipelineOpts?
 				log.Info("no output for 3 seconds")
 				log.Info(fmt.Sprintf("len[chan0] == %d", len(outputChannels[0])))
+			case <-ctx.Done():
+				break fanOut
 			}
 		}
-
+		log.Debug("halted fan-out")
 	}()
 
 	for i, namedOutput := range p.outputs {
 		log := slog.Default()
-		log = log.With("Pipeline", p.GetName())
+		log = log.With("pipeline", p.GetName())
 		log = log.With("plugin", namedOutput.name)
 
 		output := namedOutput.value
@@ -167,13 +189,16 @@ func (p *Pipeline) runOutputs(events chan Event) error {
 
 		log.Info("starting output")
 		go func() {
+		outputPump:
 			for {
 				select {
 				case outEvt := <-soloChan:
-					err := output.Run(outEvt)
+					err := output.Run(ctx, outEvt)
 					if err != nil {
 						log.Error(fmt.Sprintf("output[%s] failed: %s", "?", err.Error()))
 					}
+				case <-ctx.Done():
+					break outputPump
 				}
 			}
 		}()
@@ -207,7 +232,10 @@ func (p *Pipeline) Output(name string, f OutputPlugin) {
 	})
 }
 
-func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan Event) {
+func RunFilterChain(ctx context.Context, filters []FilterPlugin, origin chan Event, destination chan Event) {
+	log := slog.Default()
+	log = log.With("pipeline", ctx.Value("pipeline"))
+
 	// set up channels between each stage of the filter Pipeline
 	allChannels := make([]chan Event, 0)
 	allChannels = append(allChannels, origin)
@@ -222,6 +250,7 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 		filter := f // intermediate variable for goroutine
 		//index := i  // intermediate variable for goroutine
 		go func() {
+		filterPump:
 			for {
 				select {
 				case inEvt := <-filterIn:
@@ -231,15 +260,21 @@ func RunFilterChain(filters []FilterPlugin, origin chan Event, destination chan 
 						// TODO: add Pipeline name
 						slog.Error(fmt.Sprintf("error from filter[%s]: %s", "?", err.Error()))
 					}
+				case <-ctx.Done():
+					break filterPump
 				}
 			}
 		}()
 	}
 	go func() {
+	filterForwarder:
 		for {
 			select {
 			case inEvt := <-allChannels[len(allChannels)-1]:
 				destination <- inEvt
+			case <-ctx.Done():
+				log.Info("stopping filter chain")
+				break filterForwarder
 			}
 		}
 	}()

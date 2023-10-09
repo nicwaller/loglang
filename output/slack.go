@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/nicwaller/loglang"
@@ -25,11 +26,20 @@ type slackOutput struct {
 
 type SlackOptions struct {
 	BotToken string
-	Channel  string
+	Channel  string // TODO: fallback channel
 }
 
-func (p *slackOutput) Run(event loglang.Event) error {
+func (p *slackOutput) Run(ctx context.Context, event loglang.Event) error {
+	log := slog.Default().With(
+		"pipeline", ctx.Value("pipeline"),
+		"plugin", ctx.Value("plugin"),
+	)
+
+	// TODO: validate token immediately
+	// TODO: outputs should use context and process more than one event at a time
+
 	if p.sendFailures > 3 {
+		time.Sleep(time.Second)
 		return fmt.Errorf("gave up posting to Slack after %d tries", p.sendFailures)
 	}
 	// HTTP endpoint
@@ -42,14 +52,13 @@ func (p *slackOutput) Run(event loglang.Event) error {
 		Text:    event.Field("message").GetString(),
 	})
 
-	fmt.Println(string(bb))
-
 	// Create a HTTP post request
 	req, err := http.NewRequest("POST", posturl, bytes.NewBuffer(bb))
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", p.opts.BotToken))
 	req.Header.Add("Content-Type", "application/json") // essential for Slack
 	if err != nil {
 		p.sendFailures++
+		log.Error("failed posting to slack", "error", err)
 		return fmt.Errorf("failed posting to Slack: %w", err)
 	}
 
@@ -60,6 +69,7 @@ func (p *slackOutput) Run(event loglang.Event) error {
 	res, err := client.Do(req)
 	if err != nil {
 		p.sendFailures++
+		log.Error("failed posting to slack", "error", err)
 		return fmt.Errorf("failed posting to Slack: %w", err)
 	}
 	bbbb, _ := io.ReadAll(res.Body)
@@ -73,7 +83,8 @@ func (p *slackOutput) Run(event loglang.Event) error {
 
 	if !resp.Ok {
 		// TODO: validate Slack bot token much earlier
-		slog.Debug(resp.Warning)
+		log.Error("Slack API rejected our message. This is usually due to a missing or incorrect BOT_TOKEN.")
+		log.Debug(resp.Warning)
 		return fmt.Errorf("Slack API rejected our message. This is usually due to a missing or incorrect BOT_TOKEN.")
 	}
 

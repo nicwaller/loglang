@@ -2,6 +2,7 @@ package framing
 
 import (
 	"bufio"
+	"context"
 	"github.com/nicwaller/loglang"
 	"io"
 )
@@ -13,9 +14,17 @@ func Lines() loglang.FramingPlugin {
 
 type lines struct{}
 
-func (p *lines) Run(reader io.Reader, frames chan []byte) error {
+func (p *lines) Run(ctx context.Context, reader io.Reader, frames chan []byte) error {
+	running := true
+	go func() {
+		select {
+		case <-ctx.Done():
+			running = false
+		}
+	}()
+
 	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
+	for running && scanner.Scan() {
 		frames <- scanner.Bytes()
 	}
 	return nil

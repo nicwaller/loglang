@@ -1,13 +1,17 @@
 package loglang
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 type InputPlugin interface {
-	Run(chan Event) error
+	Run(context.Context, chan Event) error
 }
 
 type OutputPlugin interface {
-	Run(Event) error
+	// TODO: Run() needs a better name or purpose
+	Run(context.Context, Event) error
 }
 
 type FilterPlugin func(Event, chan<- Event) error
@@ -18,5 +22,5 @@ type CodecPlugin interface {
 }
 
 type FramingPlugin interface {
-	Run(io.Reader, chan []byte) error
+	Run(context.Context, io.Reader, chan []byte) error
 }

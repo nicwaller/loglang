@@ -1,6 +1,7 @@
 package output
 
 import (
+	"context"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
 	"os"
@@ -21,7 +22,7 @@ type StdoutOptions struct {
 	Codec loglang.CodecPlugin
 }
 
-func (p *stdOut) Run(event loglang.Event) error {
+func (p *stdOut) Run(_ context.Context, event loglang.Event) error {
 	dat, err := p.opts.Codec.Encode(event)
 	if err != nil {
 		return err
