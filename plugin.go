@@ -31,7 +31,7 @@ func (r *BatchResult) Summary() string {
 
 type OutputPlugin interface {
 	// TODO: Run() needs a better Name or purpose
-	Run(context.Context, Event) error
+	Send(context.Context, []*Event) error
 }
 
 type FilterPlugin func(event *Event, inject chan<- Event, drop func()) error

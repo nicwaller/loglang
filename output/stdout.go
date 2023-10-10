@@ -22,8 +22,17 @@ type StdoutOptions struct {
 	Codec loglang.CodecPlugin
 }
 
-func (p *stdOut) Run(_ context.Context, event loglang.Event) error {
-	dat, err := p.opts.Codec.Encode(event)
+func (p *stdOut) Send(_ context.Context, events []*loglang.Event) error {
+	for _, event := range events {
+		if err := p.sendOne(event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *stdOut) sendOne(event *loglang.Event) error {
+	dat, err := p.opts.Codec.Encode(*event)
 	if err != nil {
 		return err
 	}

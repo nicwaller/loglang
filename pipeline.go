@@ -284,7 +284,8 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
 			for {
 				select {
 				case outEvt := <-soloChan:
-					err := output.Run(ctx, outEvt)
+					// TODO: this is the opportunity to buffer and send several events at once
+					err := output.Send(ctx, []*Event{&outEvt})
 					if err != nil {
 						log.Error(fmt.Sprintf("output[%s] failed: %s", outputName, err.Error()))
 						outEvt.filterErrors <- err

@@ -57,6 +57,7 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 		evt := loglang.NewEvent()
 		switch schema {
 		case loglang.SchemaECS:
+			evt.Field("message").SetString("heartbeat")
 			evt.Field("host", "name").SetString(hostname)
 			evt.Field("event", "module").SetString("loglang")
 			evt.Field("event", "dataset").SetString("heartbeat")
@@ -73,6 +74,7 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 		case loglang.SchemaFlat:
 			fallthrough
 		default:
+			evt.Field("message").SetString("heartbeat")
 			evt.Field("module").SetString("loglang")
 			evt.Field("dataset").SetString("heartbeat")
 			evt.Field("sequence").SetInt(count)

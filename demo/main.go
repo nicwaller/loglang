@@ -20,10 +20,15 @@ func main() {
 		Schema:            loglang.SchemaECS,
 	})
 
-	p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: time.Second}))
+	//p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: 2 * time.Second}))
 	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
 	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
+	p.Output("slack", output.Slack(output.SlackOptions{
+		BotToken:        os.Getenv("BOT_TOKEN"),
+		FallbackChannel: "test-3",
+		DetailFields:    true,
+	}))
 
 	p.Filter("delay", func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
 		time.Sleep(400 * time.Millisecond)
@@ -47,10 +52,11 @@ func main() {
 }
 
 func setupLogging() {
+	// TODO: can we automatically switch to debug output when certain errors occur?
 	slog.SetDefault(slog.New(
 		tint.NewHandler(os.Stderr, &tint.Options{
-			//Level: slog.LevelDebug,
-			Level:      slog.LevelInfo,
+			Level: slog.LevelDebug,
+			//Level:      slog.LevelInfo,
 			TimeFormat: time.Kitchen,
 		}),
 	))

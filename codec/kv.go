@@ -29,6 +29,7 @@ type kvCodec struct{}
 // TODO: support encoding/decoding nested maps
 // TODO: probably should be using this library: https://pkg.go.dev/github.com/kr/logfmt?utm_source=godoc
 // TODO: support other delimiters
+// FIXME: doesn't support quoted strings with spaces in them
 
 func (p *kvCodec) Encode(evt loglang.Event) ([]byte, error) {
 	var sb strings.Builder
