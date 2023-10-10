@@ -123,7 +123,13 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		message = emojiStr + " " + message
 	}
 
-	eventErrText := event.Field("error").GetString()
+	eventErrText := loglang.CoalesceStr(
+		event.Field("error", "stack_trace").GetString(),
+		event.Field("error", "message").GetString(),
+		event.Field("error", "type").GetString(),
+		event.Field("error", "code").GetString(),
+		event.Field("error").GetString(),
+	)
 	if eventErrText != "" {
 		message = strings.Join([]string{
 			message,
