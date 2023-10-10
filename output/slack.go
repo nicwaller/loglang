@@ -326,6 +326,7 @@ var levelToEmoji = map[string]string{
 	"warn":      ":warning:",
 	"warning":   ":warning:",
 	"info":      ":information_source:",
+	"success":   ":tada:",
 	"debug":     ":mag:",
 	"trace":     ":mag:",
 	// numeric levels intentionally left out
