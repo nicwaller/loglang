@@ -54,6 +54,8 @@ type SlackOptions struct {
 	BotToken        string
 	ApiRoot         string
 	FallbackChannel string
+	IconEmoji       string
+	IconUrl         string
 	DetailFields    bool
 }
 
@@ -121,6 +123,16 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		message = emojiStr + " " + message
 	}
 
+	eventErrText := event.Field("error").GetString()
+	if eventErrText != "" {
+		message = strings.Join([]string{
+			message,
+			"```",
+			eventErrText,
+			"```",
+		}, "\n")
+	}
+
 	username := loglang.CoalesceStr(
 		event.Field("slack", "username").GetString(),
 		event.Field("slack.username").GetString(),
@@ -129,6 +141,18 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		event.Field("user", "email").GetString(),
 		event.Field("username").GetString(),
 		event.Field("user").GetString(),
+	)
+
+	icon_emoji := loglang.CoalesceStr(
+		event.Field("slack", "icon_emoji").GetString(),
+		event.Field("slack", "icon").GetString(),
+		event.Field("slack.icon").GetString(),
+		p.opts.IconEmoji,
+	)
+
+	icon_url := loglang.CoalesceStr(
+		event.Field("slack", "icon_url").GetString(),
+		p.opts.IconUrl,
 	)
 
 	blocks := make([]slackBlockKitTextElement, 0)
@@ -141,20 +165,42 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 			// ignore the special fields, especially @timestamp and @metadata
 			return
 		}
+		if field.Path[0] == "message" {
+			// don't send the message in two places
+			return
+		}
+		if len(field.Path) == 1 && field.Path[0] == "error" {
+			// an error message here is already handled elsewhere
+			return
+		}
+		if field.Path[0] == "slack" || strings.HasPrefix(field.Path[0], "slack.") {
+			// ignore fields that cause special behaviour for Slack
+			// TODO: should it be @slack instead?
+			// or maybe [@metadata][slack][emoji]?
+			return
+		}
+		val := field.GetString()
+		if strings.ContainsAny(val, "\r\n") {
+			// ugh no, multi-line attributes look awful as context elements
+			return
+		}
+
 		blocks = append(blocks, slackBlockKitTextElement{
 			Type: "mrkdwn",
 			Text: strings.Join([]string{
 				strings.Join(field.Path, "."),
 				//field.String(),
-				field.GetString(),
+				val,
 			}, ": ") + "\n",
 		})
 	})
 
 	msg := slackChatPostMessage{
-		Channel:  channel,
-		Text:     message,
-		Username: username,
+		Channel:   channel,
+		Text:      message,
+		IconEmoji: icon_emoji,
+		IconUrl:   icon_url,
+		Username:  username,
 	}
 	if p.opts.DetailFields {
 		msg.Blocks = slackBlocks([]json.RawMessage{
@@ -246,10 +292,12 @@ const (
 )
 
 type slackChatPostMessage struct {
-	Channel  string          `json:"channel"`
-	Text     string          `json:"text"`
-	Username string          `json:"username"`
-	Blocks   json.RawMessage `json:"blocks"`
+	Channel   string          `json:"channel"`
+	Text      string          `json:"text"`
+	IconEmoji string          `json:"icon_emoji"`
+	IconUrl   string          `json:"icon_url"`
+	Username  string          `json:"username"`
+	Blocks    json.RawMessage `json:"blocks"`
 }
 
 type slackApiResponse struct {

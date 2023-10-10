@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
+	"github.com/nicwaller/loglang/codec"
 	"github.com/nicwaller/loglang/input"
 	"github.com/nicwaller/loglang/output"
 	"log/slog"
@@ -22,7 +23,9 @@ func main() {
 
 	//p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: 2 * time.Second}))
 	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
-	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{}))
+	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{
+		Codec: codec.Json(),
+	}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
 	p.Output("slack", output.Slack(output.SlackOptions{
 		BotToken:        os.Getenv("BOT_TOKEN"),
