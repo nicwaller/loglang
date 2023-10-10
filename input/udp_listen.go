@@ -47,10 +47,8 @@ func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 
 	running := true
 	go func() {
-		select {
-		case <-ctx.Done():
-			running = false
-		}
+		<-ctx.Done()
+		running = false
 	}()
 
 	schema := p.opts.Schema

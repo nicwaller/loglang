@@ -111,10 +111,8 @@ func (p *Pipeline) Run() error {
 		return err
 	}
 
-	select {
-	case <-ctx.Done():
-		log.Info("stopping pipeline")
-	}
+	<-ctx.Done()
+	log.Info("stopping pipeline")
 
 	return nil
 }
@@ -205,10 +203,7 @@ func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) err
 				}()
 
 				// wait for batch to complete, either successfully or not
-				select {
-				case <-done:
-					break
-				}
+				<-done
 				result.Finish = time.Now()
 
 				return result

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
-	"github.com/nicwaller/loglang/codec"
 	"github.com/nicwaller/loglang/input"
 	"github.com/nicwaller/loglang/output"
 	"log/slog"
@@ -22,16 +21,21 @@ func main() {
 	})
 
 	//p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: 2 * time.Second}))
-	p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
-	p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{
-		Codec: codec.Json(),
+	//p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
+	//p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{
+	//	Codec: codec.Json(),
+	//}))
+	p.Input("http", input.HttpListener(2000, input.HttpListenerOptions{
+		//Framing: framing.Whole(),
+		//Codec:   codec.Json(),
+		//Schema:  loglang.SchemaLogstashECS,
 	}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
-	p.Output("slack", output.Slack(output.SlackOptions{
-		BotToken:        os.Getenv("BOT_TOKEN"),
-		FallbackChannel: "test-3",
-		DetailFields:    true,
-	}))
+	//p.Output("slack", output.Slack(output.SlackOptions{
+	//	BotToken:        os.Getenv("BOT_TOKEN"),
+	//	FallbackChannel: "test-3",
+	//	DetailFields:    true,
+	//}))
 
 	p.Filter("delay", func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
 		time.Sleep(400 * time.Millisecond)
@@ -41,12 +45,10 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
-		select {
-		case <-c:
-			fmt.Println() // ^C appears in terminal, and I want a newline after that to keep things clean
-			slog.Info("Caught Ctrl-C SIGINT")
-			p.Stop()
-		}
+		<-c
+		fmt.Println() // ^C appears in terminal, and I want a newline after that to keep things clean
+		slog.Info("Caught Ctrl-C SIGINT")
+		p.Stop()
 	}()
 
 	if err := p.Run(); err != nil {

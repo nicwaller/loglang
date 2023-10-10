@@ -17,10 +17,8 @@ type lines struct{}
 func (p *lines) Run(ctx context.Context, reader io.Reader, frames chan []byte) error {
 	running := true
 	go func() {
-		select {
-		case <-ctx.Done():
-			running = false
-		}
+		<-ctx.Done()
+		running = false
 	}()
 
 	scanner := bufio.NewScanner(reader)

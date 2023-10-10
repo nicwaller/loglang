@@ -35,10 +35,8 @@ func (p *tcpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 
 	running := true
 	go func() {
-		select {
-		case <-ctx.Done():
-			running = false
-		}
+		<-ctx.Done()
+		running = false
 	}()
 
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(p.port))

@@ -30,10 +30,8 @@ type HeartbeatOptions struct {
 func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 	running := true
 	go func() {
-		select {
-		case <-ctx.Done():
-			running = false
-		}
+		<-ctx.Done()
+		running = false
 	}()
 
 	log := slog.With("pipeline", ctx.Value("pipeline"),
@@ -92,10 +90,7 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 				Error("heartbeat failed")
 		}
 		lastDuration = result.Finish.Sub(result.Start)
-		select {
-		case <-nextHeartbeat:
-			break
-		}
+		<-nextHeartbeat
 	}
 
 	log.Debug("stopped generator")
