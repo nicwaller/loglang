@@ -40,6 +40,9 @@ func (fld *Field) Get() (any, error) {
 		}
 		if innerMap, isMap := inner.(map[string]any); isMap {
 			level = innerMap
+		} else {
+			// TODO: write good test cases for this. this is tricky.
+			return nil, fmt.Errorf("path not present")
 		}
 	}
 	panic("impossible")

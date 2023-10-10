@@ -19,7 +19,7 @@ func UdpListener(port int, opts UdpListenerOptions) loglang.InputPlugin {
 		opts.Framing = framing.Whole()
 	}
 	if opts.Codec == nil {
-		opts.Codec = codec.Kv()
+		opts.Codec = codec.Auto()
 	}
 	return &udpListener{
 		port: port,
@@ -98,7 +98,12 @@ func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 				case frame := <-frames:
 					//slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
 					evt, err := p.opts.Codec.Decode(frame)
-					if schema == loglang.SchemaECS {
+					switch schema {
+					case loglang.SchemaNone:
+						// don't enrich with any automatic fields
+					case loglang.SchemaLogstashFlat:
+						evt.Field("host").SetString(addr.IP.String())
+					case loglang.SchemaLogstashECS:
 						// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
 						evt.Field("client", "address").SetString(addr.String())
 						evt.Field("client", "ip").SetString(addr.IP.String())
@@ -106,14 +111,24 @@ func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 						evt.Field("client", "bytes").SetInt(len(frame))
 						evt.Field("server", "port").SetInt(p.port)
 						evt.Field("network", "transport").SetString("udp")
-					} else if schema == loglang.SchemaLogstashFlat {
-						evt.Field("host").SetString(addr.IP.String())
-					} else {
+					case loglang.SchemaECS:
+						// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
+						evt.Field("client", "address").SetString(addr.String())
+						evt.Field("client", "ip").SetString(addr.IP.String())
+						evt.Field("client", "port").SetInt(addr.Port)
+						evt.Field("client", "bytes").SetInt(len(frame))
+						evt.Field("server", "port").SetInt(p.port)
+						evt.Field("network", "transport").SetString("udp")
+					case loglang.SchemaFlat:
 						evt.Field("remote_addr").SetString(addr.String())
 						evt.Field("client.ip").SetString(addr.IP.String())
 						evt.Field("client.port").SetInt(addr.Port)
 						evt.Field("server.port").SetInt(p.port)
 						evt.Field("transport").SetString("udp")
+					}
+					if schema == loglang.SchemaECS {
+					} else if schema == loglang.SchemaLogstashFlat {
+					} else {
 					}
 					if err != nil {
 						slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())

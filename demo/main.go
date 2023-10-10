@@ -26,21 +26,21 @@ func main() {
 	//	Codec: codec.Json(),
 	//}))
 	p.Input("http", input.HttpListener(2000, input.HttpListenerOptions{
-		//Framing: framing.Whole(),
+		//ReplyImmediately: true,
 		//Codec:   codec.Json(),
 		//Schema:  loglang.SchemaLogstashECS,
 	}))
 	p.Output("stdout/kv", output.StdOut(output.StdoutOptions{}))
-	//p.Output("slack", output.Slack(output.SlackOptions{
-	//	BotToken:        os.Getenv("BOT_TOKEN"),
-	//	FallbackChannel: "test-3",
-	//	DetailFields:    true,
-	//}))
+	p.Output("slack", output.Slack(output.SlackOptions{
+		BotToken:        os.Getenv("BOT_TOKEN"),
+		FallbackChannel: "test-3",
+		DetailFields:    true,
+	}))
 
-	p.Filter("delay", func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
-		time.Sleep(400 * time.Millisecond)
-		return nil
-	})
+	//p.Filter("delay", func(event *loglang.Event, inject chan<- loglang.Event, drop func()) error {
+	//	time.Sleep(1400 * time.Millisecond)
+	//	return nil
+	//})
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)

@@ -54,6 +54,8 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 		nextHeartbeat := time.After(opts.Interval)
 		evt := loglang.NewEvent()
 		switch schema {
+		case loglang.SchemaNone:
+			// don't enrich with any automatic fields
 		case loglang.SchemaECS:
 			evt.Field("message").SetString("heartbeat")
 			evt.Field("host", "name").SetString(hostname)

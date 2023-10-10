@@ -112,7 +112,7 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		event.Field("log.level").GetString(),
 		event.Field("level").GetString(),
 	)
-	autoEmojiStr := emojiMap[level]
+	autoEmojiStr := levelToEmoji[level]
 	emojiStr := loglang.CoalesceStr(
 		event.Field("slack", "emoji").GetString(),
 		event.Field("slack.emoji").GetString(),
@@ -123,6 +123,8 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		message = emojiStr + " " + message
 	}
 
+	x := event.Field("error", "message").GetString()
+	fmt.Println(x)
 	eventErrText := loglang.CoalesceStr(
 		event.Field("error", "stack_trace").GetString(),
 		event.Field("error", "message").GetString(),
@@ -155,6 +157,9 @@ func (p *slackOutput) sendOne(ctx context.Context, event *loglang.Event) error {
 		event.Field("slack.icon").GetString(),
 		p.opts.IconEmoji,
 	)
+	if icon_emoji != "" {
+		icon_emoji = ":" + strings.Trim(icon_emoji, ":") + ":"
+	}
 
 	icon_url := loglang.CoalesceStr(
 		event.Field("slack", "icon_url").GetString(),
@@ -300,9 +305,9 @@ const (
 type slackChatPostMessage struct {
 	Channel   string          `json:"channel"`
 	Text      string          `json:"text"`
-	IconEmoji string          `json:"icon_emoji"`
-	IconUrl   string          `json:"icon_url"`
-	Username  string          `json:"username"`
+	IconEmoji string          `json:"icon_emoji,omitempty"`
+	IconUrl   string          `json:"icon_url,omitempty"`
+	Username  string          `json:"username,omitempty"`
 	Blocks    json.RawMessage `json:"blocks"`
 }
 
@@ -314,14 +319,20 @@ type slackApiResponse struct {
 	Error     string `json:"error"`
 }
 
-var emojiMap = map[string]string{
+var levelToEmoji = map[string]string{
 	"important": ":exclamation:",
 	"alert":     ":exclamation:",
 	"error":     ":boom:",
 	"warn":      ":warning:",
 	"warning":   ":warning:",
 	"info":      ":information_source:",
+	"debug":     ":mag:",
+	"trace":     ":mag:",
+	// numeric levels intentionally left out
+	// they are not guaranteed to be consistent between languages
 }
+
+// FIXME: these JSON shenanigans fail when pipeline using SchemaNone
 
 func slackBlocks(blocks []json.RawMessage) json.RawMessage {
 	var sb strings.Builder

@@ -3,6 +3,7 @@ package input
 import (
 	"context"
 	"github.com/nicwaller/loglang"
+	"github.com/nicwaller/loglang/codec"
 	"log/slog"
 	"net"
 	"strconv"
@@ -10,6 +11,9 @@ import (
 )
 
 func NewTcpListener(port int, opts TcpListenerOptions) loglang.InputPlugin {
+	if opts.Codec == nil {
+		opts.Codec = codec.Auto()
+	}
 	return &tcpListener{
 		port: port,
 		opts: opts,
