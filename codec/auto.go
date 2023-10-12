@@ -27,6 +27,7 @@ func (p *autoCodec) Decode(dat []byte) (loglang.Event, error) {
 		panic("codec[auto] does not support YAML")
 	} else if apacheCommonLogPattern.Match(dat) {
 		var c ncsaCommonLog
+		c.schema = loglang.SchemaFlat
 		return c.Decode(dat)
 	} else {
 		var c kvCodec

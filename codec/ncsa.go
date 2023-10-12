@@ -83,21 +83,34 @@ func (p *ncsaCommonLog) Decode(dat []byte) (loglang.Event, error) {
 	evt := loglang.NewEvent()
 
 	switch p.schema {
-	case loglang.SchemaECS:
+	case loglang.SchemaLogstashFlat:
+		// https://github.com/logstash-plugins/logstash-patterns-core/blob/10d9a9318bfee2e2e320e02a67057a193661ebd9/patterns/httpd#L5
+		evt.Field("clientip").SetString(host)
+		evt.Field("ident").SetString(identUser)
+		evt.Field("auth", "id").SetString(authuser)
+		evt.Field("timestamp").SetString(datestamp)
+		evt.Field("verb").SetString(method)
+		evt.Field("request").SetString(path)
+		evt.Field("httpversion").SetString(httpVersion)
+		evt.Field("bytes").SetInt(requestByteCount)
+		evt.Field("response").SetInt(httpStatusCode)
+		evt.Field("referrer").SetString(referrer)
+		evt.Field("agent").SetString(useragent)
+
+	case loglang.SchemaFlat:
 		evt.Field("@timestamp").SetString(datestamp)
-		evt.Field("http", "version").SetString(httpVersion)
-		evt.Field("http", "request", "referrer").SetString(referrer)
-		evt.Field("http", "request", "method").SetString(method)
-		evt.Field("http", "response", "body", "bytes").SetInt(requestByteCount)
-		evt.Field("http", "response", "status_code").SetInt(httpStatusCode)
-		evt.Field("host", "hostname").SetString(host) // ???
-		evt.Field("user", "name").SetString(authuser)
-		evt.Field("user", "id").SetString(identUser)
-		evt.Field("user_agent", "original").SetString(useragent)
-		evt.Field("url", "path").SetString(path)
-	case loglang.SchemaFlat, loglang.SchemaLogstashECS, loglang.SchemaLogstashFlat:
-		fallthrough
-	default:
+		evt.Field("http_version").SetString(httpVersion)
+		evt.Field("http_referrer").SetString(referrer)
+		evt.Field("http_method").SetString(method)
+		evt.Field("bytes").SetInt(requestByteCount)
+		evt.Field("http_status_code").SetInt(httpStatusCode)
+		evt.Field("host").SetString(host) // ???
+		//evt.Field("user", "name").SetString(authuser)
+		//evt.Field("user", "id").SetString(identUser)
+		evt.Field("user_agent").SetString(useragent)
+		evt.Field("path").SetString(path)
+
+	case loglang.SchemaLogstashECS:
 		//	https://www.elastic.co/guide/en/elasticsearch/reference/current/common-log-format-example.html
 		evt.Field("@timestamp").SetString(datestamp)
 		evt.Field("http", "version").SetString(httpVersion)
@@ -110,6 +123,19 @@ func (p *ncsaCommonLog) Decode(dat []byte) (loglang.Event, error) {
 		evt.Field("user", "id").SetString(authuser)
 		evt.Field("user_agent").SetString(useragent)
 		evt.Field("url", "original").SetString(path)
+
+	case loglang.SchemaECS:
+		evt.Field("@timestamp").SetString(datestamp)
+		evt.Field("http", "version").SetString(httpVersion)
+		evt.Field("http", "request", "referrer").SetString(referrer)
+		evt.Field("http", "request", "method").SetString(method)
+		evt.Field("http", "response", "body", "bytes").SetInt(requestByteCount)
+		evt.Field("http", "response", "status_code").SetInt(httpStatusCode)
+		evt.Field("host", "hostname").SetString(host) // ???
+		evt.Field("user", "name").SetString(authuser)
+		evt.Field("user", "id").SetString(identUser)
+		evt.Field("user_agent", "original").SetString(useragent)
+		evt.Field("url", "path").SetString(path)
 	}
 
 	return evt, nil
