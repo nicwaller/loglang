@@ -174,6 +174,7 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 		}()
 
 		for frameReader := range frames {
+			// FIXME: this doesn't end when using .Whole()?
 			frameData, err := io.ReadAll(frameReader)
 			if err != nil {
 				return nil, err

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,7 +19,7 @@ func HttpListener(port int, opts HttpListenerOptions) loglang.InputPlugin {
 		opts: opts,
 	}
 	// FIXME: this needs to be more global?
-	h.Framing = []loglang.FramingPlugin{framing.Lines()}
+	h.Framing = []loglang.FramingPlugin{framing.Auto()}
 	h.Codec = codec.Auto()
 	return h
 }
@@ -48,7 +49,11 @@ func (p *httpListener) Run(ctx context.Context, sender loglang.Sender) error {
 		writer.Header().Add("Content-Type", "text/plain")
 
 		var doSending func() (*loglang.BatchResult, error)
-		switch request.Header.Get("Content-Type") {
+
+		rawContentType := request.Header.Get("Content-Type")
+		contentType, _, _ := strings.Cut(rawContentType, ";")
+		// TODO: maybe handle different charsets? But UTF-8 is so prevalent.
+		switch contentType {
 		case "text/plain":
 			doSending = func() (*loglang.BatchResult, error) {
 				return sender.SendWithFramingCodec(
@@ -76,6 +81,16 @@ func (p *httpListener) Run(ctx context.Context, sender loglang.Sender) error {
 					eventTemplate,
 					framing.Lines(),
 					codec.Json(),
+					request.Body,
+				)
+			}
+		case "application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml", "text/vnd.yaml":
+			doSending = func() (*loglang.BatchResult, error) {
+				return sender.SendWithFramingCodec(
+					request.Context(),
+					eventTemplate,
+					framing.Whole(),
+					codec.Yaml(),
 					request.Body,
 				)
 			}

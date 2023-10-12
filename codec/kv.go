@@ -49,8 +49,11 @@ func (p *kvCodec) Encode(evt loglang.Event) ([]byte, error) {
 			sb.WriteString(strconv.FormatFloat(floatVal, 'f', -1, 64))
 		} else if boolVal, ok := value.(bool); ok {
 			sb.WriteString(strconv.FormatBool(boolVal))
+		} else if _, ok := value.([]any); ok {
+			slog.Error("kv encoding doesn't handle arrays/slices")
+			sb.WriteString("[]")
 		} else {
-			panic("unhandled type")
+			slog.Error("kv encoding doesn't handle this type: " + field.String())
 		}
 		// TODO: trim the trailing space
 		sb.WriteString(` `)

@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"fmt"
 	"github.com/nicwaller/loglang"
 	"regexp"
 )
@@ -11,8 +12,9 @@ func Auto() loglang.CodecPlugin {
 
 type autoCodec struct{}
 
-func (p *autoCodec) Encode(_ loglang.Event) ([]byte, error) {
-	panic("codec[auto] does not support encoding")
+func (p *autoCodec) Encode(evt loglang.Event) ([]byte, error) {
+	var c jsonCodec
+	return c.Encode(evt)
 }
 
 func (p *autoCodec) Decode(dat []byte) (loglang.Event, error) {
@@ -20,11 +22,14 @@ func (p *autoCodec) Decode(dat []byte) (loglang.Event, error) {
 		var c jsonCodec
 		return c.Decode(dat)
 	} else if dat[0] == 0x1f && dat[1] == 0x8b {
-		panic("codec[auto] does not support GZIP")
+		// detected magic bytes for gzip
+		return loglang.Event{}, fmt.Errorf("autoCodec doesn't support gzip; use framing for that")
 	} else if dat[0] == 0x1e && dat[1] == 0x0f {
-		panic("codec[auto] does not support Chunked GELF")
+		// detected magic bytes for chunked GELF
+		return loglang.Event{}, fmt.Errorf("autoCodec doesn't support chunked GELF; use framing for that")
 	} else if dat[0] == '-' && dat[1] == '-' && dat[2] == '-' {
-		panic("codec[auto] does not support YAML")
+		var c yamlCodec
+		return c.Decode(dat)
 	} else if apacheCommonLogPattern.Match(dat) {
 		var c ncsaCommonLog
 		c.schema = loglang.SchemaFlat

@@ -23,6 +23,7 @@ type whole struct{}
 func (p *whole) Extract(_ context.Context, streams <-chan io.Reader, out chan<- io.Reader) error {
 	first := <-streams
 	out <- first
+	close(out)
 
 	// check to see if we've been given too many packets on the channel
 	select {
