@@ -19,7 +19,7 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 		options.StalledInputThreshold = 24 * time.Hour
 	}
 	if options.SlowBatchWarning == 0 {
-		options.SlowBatchWarning = 5 * time.Second
+		options.SlowBatchWarning = 3 * time.Second
 	}
 	if options.BatchTimeout == 0 {
 		options.BatchTimeout = time.Minute
@@ -28,7 +28,7 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	p.opts = options
 	p.Name = name
 
-	p.Filter("default @timestamp", func(event *Event, inject chan<- Event, drop func()) error {
+	p.Filter("default @timestamp", func(event *Event, inject chan<- *Event, drop func()) error {
 		event.Field("@timestamp").Default(time.Now().Format(time.RFC3339))
 		return nil
 	})
@@ -42,7 +42,7 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 			f.Path = []string{"ingested"}
 		}
 
-		p.Filter("mark ingestion time", func(event *Event, events chan<- Event, drop func()) error {
+		p.Filter("mark ingestion time", func(event *Event, events chan<- *Event, drop func()) error {
 			f.original = event
 			f.Default(time.Now().Format(time.RFC3339))
 			return nil
@@ -93,9 +93,9 @@ func (p *Pipeline) Run() error {
 	log = log.With("pipeline", p.GetName())
 
 	// all inputs are multiplexed to a single input channel
-	combinedInputs := make(chan Event, ChanBufferSize)
+	combinedInputs := make(chan *Event, ChanBufferSize)
 	// a single output channel does fan-out to all outputs
-	outChan := make(chan Event, ChanBufferSize)
+	outChan := make(chan *Event, ChanBufferSize)
 
 	// set up filters first, then outputs, then inputs LAST!
 
@@ -125,109 +125,46 @@ func (p *Pipeline) Stop() {
 	p.stop()
 }
 
-func (p *Pipeline) runInputs(ctx context.Context, combinedInputs chan Event) error {
-	log := slog.With("pipeline", ctx.Value("pipeline"))
-	log.Debug("starting inputs")
+// TODO: should this function be runInput (singular) for readability?
+func (p *Pipeline) runInputs(pipelineContext context.Context, combinedInputs chan *Event) error {
+	pipelineLog := slog.With("pipeline", pipelineContext.Value("pipeline"))
+	pipelineLog.Debug("starting inputs")
 
 	for _, entity := range p.inputs {
 		plugin := entity.Value.plugin
 		pluginName := entity.Name
 
-		log := slog.Default()
-		log = log.With("pipeline", p.GetName())
-		log = log.With("plugin", entity.Name)
+		pluginContext := context.WithValue(pipelineContext, "plugin", pluginName)
+		log := loggerFromContext(pluginContext)
 
-		inChan := make(chan Event, ChanBufferSize)
-
-		RunFilterChain(ctx, entity.Value.filterChain, inChan, combinedInputs, false)
+		inChan := make(chan *Event, ChanBufferSize)
+		RunFilterChain(pluginContext, entity.Value.filterChain, inChan, combinedInputs, false)
 
 		log.Info("starting input")
 		go func() {
-			pluginContext := context.WithValue(ctx, "plugin", pluginName)
-			err := plugin.Run(pluginContext, func(events ...Event) BatchResult {
-				fanout := len(events)
-				pendingFilter := fanout
-				pendingOutput := fanout * len(p.outputs)
-				filterBurndown := make(chan bool)
-				outputBurndown := make(chan bool)
-				dropChan := make(chan bool)
-				filterErrors := make(chan error)
-				for _, event := range events {
-					event.filterBurndown = filterBurndown
-					event.outputBurndown = outputBurndown
-					event.dropChan = dropChan
-					event.filterErrors = filterErrors
-					inChan <- event
-				}
-				done := make(chan bool)
-
-				result := BatchResult{
-					TotalCount:   fanout,
-					DropCount:    0,
-					ErrorCount:   0,
-					SuccessCount: 0,
-					Ok:           true,
-					Errors:       make([]error, 0),
-				}
-
-				result.Start = time.Now()
-				go func() {
-					// TODO: customize this in pipeline options
-					slowBatchWarning := time.After(p.opts.SlowBatchWarning)
-					batchDeadline := time.After(p.opts.BatchTimeout)
-					for pendingFilter > 0 || pendingOutput > 0 {
-						select {
-						case <-filterBurndown:
-							pendingFilter -= 1
-						case <-outputBurndown:
-							pendingOutput -= 1
-							// TODO: how do I increment success count? how do I know an event was published to all filters?
-						case <-dropChan:
-							pendingFilter -= 1
-							pendingOutput -= fanout
-							result.DropCount++
-						case err := <-filterErrors:
-							//result.Ok = false
-							result.ErrorCount += 1
-							result.Errors = append(result.Errors, err)
-						case <-slowBatchWarning:
-							log.Warn("batch is taking longer than expected")
-						case <-batchDeadline:
-							log.Error(fmt.Sprintf("batch timed out after %v", p.opts.BatchTimeout))
-							result.Ok = false
-							done <- true
-							return
-						}
-					}
-					done <- true
-				}()
-
-				// wait for batch to complete, either successfully or not
-				<-done
-				result.Finish = time.Now()
-
-				return result
-			})
-			if err == nil {
-				log.Info("input stopped")
-			} else {
+			//events := make(chan *Event)
+			sender := NewSender(pluginContext, inChan, plugin.Extract, len(p.outputs))
+			err := plugin.Run(pluginContext, sender)
+			if err != nil {
 				log.Error("input failed", "error", err)
+			} else {
+				log.Info("input stopped")
 			}
 		}()
 	}
 	return nil
 }
 
-func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
+func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
 	log := slog.With("pipeline", ctx.Value("pipeline"))
 	log.Debug("starting outputs")
 
 	// set up an output channel for each output
-	outputChannels := make([]chan Event, len(p.outputs))
+	outputChannels := make([]chan *Event, len(p.outputs))
 	for i := 0; i < len(p.outputs); i++ {
 		// TODO: PERF: we might want a larger buffer here
 		// TODO: alert if length of output channel becomes large using len()
-		outputChannels[i] = make(chan Event, 1)
+		outputChannels[i] = make(chan *Event, 1)
 	}
 
 	// TODO: remove debugging to print channel sizes
@@ -280,12 +217,16 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan Event) error {
 				select {
 				case outEvt := <-soloChan:
 					// TODO: this is the opportunity to buffer and send several events at once
-					err := output.Send(ctx, []*Event{&outEvt})
+					err := output.Send(ctx, []*Event{outEvt})
 					if err != nil {
 						log.Error(fmt.Sprintf("output[%s] failed: %s", outputName, err.Error()))
-						outEvt.filterErrors <- err
+						if outEvt.batch != nil {
+							outEvt.batch.errorHappened <- err
+						}
 					} else {
-						outEvt.outputBurndown <- true
+						if outEvt.batch != nil {
+							outEvt.batch.outputBurndown <- 1
+						}
 					}
 				case <-ctx.Done():
 					break outputPump
@@ -322,15 +263,15 @@ func (p *Pipeline) Output(name string, f OutputPlugin) {
 	})
 }
 
-func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], origin chan Event, destination chan Event, ack bool) {
+func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], origin chan *Event, destination chan *Event, ack bool) {
 	log := slog.Default()
 	log = log.With("pipeline", ctx.Value("pipeline"))
 
 	// set up channels between each stage of the filter Pipeline
-	allChannels := make([]chan Event, 0)
+	allChannels := make([]chan *Event, 0)
 	allChannels = append(allChannels, origin)
 	for i := 0; i < len(filters); i++ {
-		allChannels = append(allChannels, make(chan Event, 2))
+		allChannels = append(allChannels, make(chan *Event, 2))
 	}
 
 	// set up goroutines to pump each stage of the Pipeline
@@ -353,9 +294,11 @@ func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], or
 							dropped = true
 						}
 					}
-					err := filterFunc(&event, filterOut, dropFunc)
+					err := filterFunc(event, filterOut, dropFunc)
 					if err != nil {
-						event.filterErrors <- err
+						if event.batch != nil {
+							event.batch.errorHappened <- err
+						}
 						log.Warn("filter error",
 							"error", err,
 							"filter", filterName,
@@ -364,11 +307,13 @@ func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], or
 						filterOut <- event
 					} else if dropped {
 						// do not pass to next stage of filter pipeline
-						if ack {
-							event.dropChan <- true
+						if ack && event.batch != nil {
+							event.batch.dropHappened <- true
 						}
 					} else {
-						event.filterBurndown <- true
+						if event.batch != nil {
+							event.batch.filterBurndown <- 1
+						}
 						filterOut <- event
 					}
 				case <-ctx.Done():

@@ -17,6 +17,7 @@ func Heartbeat(opts HeartbeatOptions) loglang.InputPlugin {
 }
 
 type generator struct {
+	loglang.BaseInputPlugin
 	opts HeartbeatOptions
 }
 
@@ -27,7 +28,7 @@ type HeartbeatOptions struct {
 	Schema   loglang.SchemaModel
 }
 
-func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
+func (p *generator) Run(ctx context.Context, sender loglang.Sender) error {
 	running := true
 	go func() {
 		<-ctx.Done()
@@ -36,6 +37,8 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 
 	log := slog.With("pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"))
+
+	sender.SetE2E(true)
 
 	schema := p.opts.Schema
 	if schema == loglang.SchemaNotDefined {
@@ -85,13 +88,15 @@ func (p *generator) Run(ctx context.Context, send loglang.BatchSender) error {
 		// but that just masks the fact that heartbeats SHOULD be fast
 		// don't worry about lost heartbeats
 		// the pipeline will generate errors if batches time out
-		result := send(evt)
-		if !result.Ok {
-			log.
-				With("error", result.Summary()).
-				Error("heartbeat failed")
+		result := sender.Send(&evt)
+		if result != nil {
+			if !result.Ok {
+				log.
+					With("error", result.Summary()).
+					Error("heartbeat failed")
+			}
+			lastDuration = result.Finish.Sub(result.Start)
 		}
-		lastDuration = result.Finish.Sub(result.Start)
 		<-nextHeartbeat
 	}
 

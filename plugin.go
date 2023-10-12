@@ -4,29 +4,88 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
+	"log/slog"
 )
 
 type InputPlugin interface {
-	Run(context.Context, BatchSender) error
+	Run(context.Context, Sender) error
+	Extract(context.Context, *Event, io.Reader, chan *Event) error
+	//Extractor
 }
 
-type BatchSender func(...Event) BatchResult
+type Extractor func(context.Context, *Event, io.Reader, chan *Event) error
 
-type BatchResult struct {
-	TotalCount   int
-	DropCount    int
-	ErrorCount   int
-	SuccessCount int
-	Ok           bool
-	Errors       []error
-	Start        time.Time
-	Finish       time.Time
+type BaseInputPlugin struct {
+	Framing []FramingPlugin
+	Codec   CodecPlugin
+	Schema  SchemaModel
 }
 
-func (r *BatchResult) Summary() string {
-	return fmt.Sprintf("Ok=%t TotalCount=%d SuccessCount=%d DropCount=%d ErrorCount=%d",
-		r.Ok, r.TotalCount, r.SuccessCount, r.DropCount, r.ErrorCount)
+func (p *BaseInputPlugin) Run(_ context.Context, _ Sender) error {
+	// Run should be overridden by plugin implementations
+	return fmt.Errorf("not implemented")
+}
+
+// Extract runs all the framing stages and codec. Output is a channel of decoded Events.
+func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader io.Reader, output chan *Event) error {
+	if p.Codec == nil {
+		panic("input codec must not be nil")
+	}
+
+	log := slog.Default().With(
+		"pipeline", ctx.Value("pipeline"),
+		"plugin", ctx.Value("plugin"),
+	)
+
+	switch len(p.Framing) {
+	case 0:
+		// TODO: should we fall back to something else? Lines()
+		panic("no framing configured on input plugin")
+
+	case 1:
+		stage := p.Framing[0]
+		// The happy path is exactly one level of framing
+		// because we exactly one io.Reader to think about
+		justOneReader := make(chan io.Reader, 1)
+		justOneReader <- reader
+		frames := make(chan io.Reader)
+
+		// start producing frames
+		go func() {
+			err := stage.Extract(ctx, justOneReader, frames)
+			if err != nil {
+				log.Error("framing stage failed", "error", err)
+			}
+		}()
+		// consume those frames
+		for frame := range frames {
+			dat, err := io.ReadAll(frame)
+			if err != nil {
+				return fmt.Errorf("de-framing failed: %w", err)
+			}
+			evt, err := p.Codec.Decode(dat)
+			evt.Merge(template, false)
+			if err != nil {
+				return fmt.Errorf("frame decoding failed: %w", err)
+			}
+			output <- &evt
+		}
+		return nil
+
+	case 2, 3, 4:
+		// we should be prepared for multiple levels of framing
+		// select{} doesn't work well with arrays of channels, so the max is hardcoded
+		// TODO: write this hard code for handling variable number of stages, all in the same goroutine
+		// what about running Extract() recursively?
+		// I don't think we want to spin up multiple goroutines for *each and every event*!
+		return fmt.Errorf("not yet implemented: multiple framing stages")
+
+	default:
+		panic("too many framing stages")
+
+	}
+
+	return nil
 }
 
 type OutputPlugin interface {
@@ -34,13 +93,19 @@ type OutputPlugin interface {
 	Send(context.Context, []*Event) error
 }
 
-type FilterPlugin func(event *Event, inject chan<- Event, drop func()) error
+type FilterPlugin func(event *Event, inject chan<- *Event, drop func()) error
 
 type CodecPlugin interface {
 	Encode(Event) ([]byte, error)
 	Decode([]byte) (Event, error)
+	// FIXME: change to *Event
 }
 
 type FramingPlugin interface {
-	Run(context.Context, io.Reader, chan []byte) error
+	// return type must be io.Reader
+	// usually framing returns single events (small)
+	// but it might also be decompression of a 5GB object in S3
+	Extract(context.Context, <-chan io.Reader, chan<- io.Reader) error
+	Frameup(context.Context, <-chan io.Reader, io.Writer) error
+	// the lack of symmetry here feels very weird to me -NW
 }

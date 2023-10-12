@@ -7,6 +7,7 @@ import (
 
 //goland:noinspection GoUnusedExportedFunction
 func Plain(fieldName string) loglang.CodecPlugin {
+	// TODO: fieldName should be optional and default to "message"
 	return &plainCodec{fieldName: fieldName}
 }
 

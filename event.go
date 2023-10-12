@@ -5,20 +5,13 @@ import (
 )
 
 type Event struct {
-	// Start with flat, maybe add hierarchy later
-	// Start with strings, maybe other types later
 	Fields map[string]interface{}
-	//touchOrder []string
-	filterBurndown chan bool
-	outputBurndown chan bool
-	filterErrors   chan error
-	dropChan       chan bool
+	batch  *publishingBatch
 }
 
 func NewEvent() Event {
 	var newEvt Event
 	newEvt.Fields = make(map[string]interface{})
-	//newEvt.touchOrder = make([]string, 0)
 	return newEvt
 }
 
@@ -54,21 +47,23 @@ func (evt *Event) Get(field string) any {
 type fieldCb func(field Field)
 
 func (evt *Event) TraverseFields(cb fieldCb) {
-	evt.traverseFields(cb, []string{}, &evt.Fields)
+	evt.traverseFields(true, cb, []string{}, &evt.Fields)
 }
 
-func (evt *Event) traverseFields(cb fieldCb, prefix []string, from *map[string]any) {
+func (evt *Event) traverseFields(inOrder bool, cb fieldCb, prefix []string, from *map[string]any) {
 	// getting an ordered set of keys is essential for deterministic encoding, especially for the kv codec
 	keys := make([]string, 0, len(*from))
 	for k := range *from {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	if inOrder {
+		sort.Strings(keys)
+	}
 	// now traverse the keys in order
 	for _, k := range keys {
 		v := (*from)[k]
 		if z, isMap := v.(map[string]any); isMap {
-			evt.traverseFields(cb, append(prefix, k), &z)
+			evt.traverseFields(inOrder, cb, append(prefix, k), &z)
 		} else {
 			cb(Field{
 				Path:     append(prefix, k),
@@ -86,6 +81,18 @@ func (evt *Event) Copy() Event {
 	//newEvt.touchOrder = make([]string, len(evt.touchOrder))
 	//copy(newEvt.touchOrder, evt.touchOrder)
 	return newEvt
+}
+
+func (evt *Event) Merge(template *Event, overwrite bool) {
+	template.traverseFields(false, func(field Field) {
+		v := field.MustGet()
+		field.original = evt
+		if overwrite {
+			field.Set(v)
+		} else {
+			field.Default(v)
+		}
+	}, []string{}, &evt.Fields)
 }
 
 //func (evt *Event) touch(field string) {

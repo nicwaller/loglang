@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
-	"time"
 )
 
 // test with echo -n test | nc -u -w0 localhost 9999
@@ -28,6 +27,7 @@ func UdpListener(port int, opts UdpListenerOptions) loglang.InputPlugin {
 }
 
 type udpListener struct {
+	loglang.BaseInputPlugin
 	opts UdpListenerOptions
 	port int
 }
@@ -38,7 +38,7 @@ type UdpListenerOptions struct {
 	Schema  loglang.SchemaModel
 }
 
-func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
+func (p *udpListener) Run(ctx context.Context, sender loglang.Sender) error {
 	log := slog.Default().With(
 		"pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"),
@@ -73,75 +73,59 @@ func (p *udpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 	}(conn)
 
 	for running {
+		// TODO: we probably need a bigger buffer? maybe 65KB for GELF?
 		var buf [4096]byte
+
+		// PERF: should we have multiple goroutines receiving in parallel?
 		// UDP is not stream based, so we read each individual datagram
 		rlen, addr, err := conn.ReadFromUDP(buf[:])
-		if rlen == 1 {
-			// FIXME : wtf is this X
-			continue
-		}
 		if err != nil {
 			return err
+		} else {
+			slog.Debug(fmt.Sprintf("got UDP datagram of %d bytes", rlen))
 		}
-		slog.Debug(fmt.Sprintf("got UDP datagram of %d bytes", rlen))
 
-		frames := make(chan []byte)
-		go func() {
-			err := p.opts.Framing.Run(ctx, bytes.NewReader(buf[:rlen]), frames)
-			if err != nil {
-				slog.Error(err.Error())
-			}
-		}()
-		go func() {
-			for {
-				select {
-				case frame := <-frames:
-					//slog.Debug(fmt.Sprintf("got a frame of %d bytes", len(frame)))
-					evt, err := p.opts.Codec.Decode(frame)
-					switch schema {
-					case loglang.SchemaNone:
-						// don't enrich with any automatic fields
-					case loglang.SchemaLogstashFlat:
-						evt.Field("host").SetString(addr.IP.String())
-					case loglang.SchemaLogstashECS:
-						// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
-						evt.Field("client", "address").SetString(addr.String())
-						evt.Field("client", "ip").SetString(addr.IP.String())
-						evt.Field("client", "port").SetInt(addr.Port)
-						evt.Field("client", "bytes").SetInt(len(frame))
-						evt.Field("server", "port").SetInt(p.port)
-						evt.Field("network", "transport").SetString("udp")
-					case loglang.SchemaECS:
-						// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
-						evt.Field("client", "address").SetString(addr.String())
-						evt.Field("client", "ip").SetString(addr.IP.String())
-						evt.Field("client", "port").SetInt(addr.Port)
-						evt.Field("client", "bytes").SetInt(len(frame))
-						evt.Field("server", "port").SetInt(p.port)
-						evt.Field("network", "transport").SetString("udp")
-					case loglang.SchemaFlat:
-						evt.Field("remote_addr").SetString(addr.String())
-						evt.Field("client.ip").SetString(addr.IP.String())
-						evt.Field("client.port").SetInt(addr.Port)
-						evt.Field("server.port").SetInt(p.port)
-						evt.Field("transport").SetString("udp")
-					}
-					if schema == loglang.SchemaECS {
-					} else if schema == loglang.SchemaLogstashFlat {
-					} else {
-					}
-					if err != nil {
-						slog.Error(fmt.Errorf("lost whole datagram or part of datagram: %w", err).Error())
-					} else {
-						send(evt)
-					}
-				case <-time.After(30 * time.Second):
-					return
-				}
-
-			}
-		}()
+		templ := p.eventTemplate(addr)
+		_, err = sender.SendRaw(ctx, templ, bytes.NewReader(buf[:rlen]))
+		if err != nil {
+			log.Error("problem in udp listener", "error", err)
+		}
 	}
 
 	return nil
+}
+
+func (p *udpListener) eventTemplate(addr *net.UDPAddr) *loglang.Event {
+	evt := loglang.NewEvent()
+
+	switch p.Schema {
+	case loglang.SchemaNone:
+		// don't enrich with any automatic fields
+	case loglang.SchemaLogstashFlat:
+		evt.Field("host").SetString(addr.IP.String())
+	case loglang.SchemaLogstashECS:
+		// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
+		evt.Field("client", "address").SetString(addr.String())
+		evt.Field("client", "ip").SetString(addr.IP.String())
+		evt.Field("client", "port").SetInt(addr.Port)
+		//evt.Field("client", "bytes").SetInt(frameLen)
+		evt.Field("server", "port").SetInt(p.port)
+		evt.Field("network", "transport").SetString("udp")
+	case loglang.SchemaECS:
+		// NOTE: logstash uses [host] instead of [client] but I think that's weird. -NW
+		evt.Field("client", "address").SetString(addr.String())
+		evt.Field("client", "ip").SetString(addr.IP.String())
+		evt.Field("client", "port").SetInt(addr.Port)
+		//evt.Field("client", "bytes").SetInt(frameLen)
+		evt.Field("server", "port").SetInt(p.port)
+		evt.Field("network", "transport").SetString("udp")
+	case loglang.SchemaFlat:
+		evt.Field("remote_addr").SetString(addr.String())
+		evt.Field("client.ip").SetString(addr.IP.String())
+		evt.Field("client.port").SetInt(addr.Port)
+		evt.Field("server.port").SetInt(p.port)
+		evt.Field("transport").SetString("udp")
+	}
+
+	return &evt
 }

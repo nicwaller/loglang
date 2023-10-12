@@ -4,33 +4,32 @@ import (
 	"context"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
+	"github.com/nicwaller/loglang/framing"
 	"log/slog"
 	"net"
 	"strconv"
-	"time"
 )
 
 func NewTcpListener(port int, opts TcpListenerOptions) loglang.InputPlugin {
-	if opts.Codec == nil {
-		opts.Codec = codec.Auto()
-	}
-	return &tcpListener{
+	// FIXME: this needs to be more global?
+	t := &tcpListener{
 		port: port,
 		opts: opts,
 	}
+	t.Framing = []loglang.FramingPlugin{framing.Lines()}
+	t.Codec = codec.Auto()
+	return t
 }
 
 type tcpListener struct {
+	loglang.BaseInputPlugin
 	port int
 	opts TcpListenerOptions
 }
 
-type TcpListenerOptions struct {
-	Framing loglang.FramingPlugin
-	Codec   loglang.CodecPlugin
-}
+type TcpListenerOptions struct{}
 
-func (p *tcpListener) Run(ctx context.Context, send loglang.BatchSender) error {
+func (p *tcpListener) Run(ctx context.Context, sender loglang.Sender) error {
 	log := slog.Default().With(
 		"pipeline", ctx.Value("pipeline"),
 		"plugin", ctx.Value("plugin"),
@@ -54,38 +53,11 @@ func (p *tcpListener) Run(ctx context.Context, send loglang.BatchSender) error {
 		if err != nil {
 			log.Warn("failed accepting tcp connection")
 		}
-		go tcpReading(ctx, conn, send, p.opts.Framing, p.opts.Codec)
+		// TODO: prepare a better template event, like UDP listener
+		// TODO: is there a Context for TCP connection?
+		result, err := sender.SendRaw(ctx, nil, conn)
+		_, _ = conn.Write([]byte(result.Summary()))
 	}
 	log.Debug("stopped")
 	return nil
-}
-
-// TODO: practice with "lines" framing
-func tcpReading(ctx context.Context, conn net.Conn, send loglang.BatchSender, framer loglang.FramingPlugin, codec loglang.CodecPlugin) {
-	frames := make(chan []byte)
-	go func() {
-		slog.Debug("starting framer")
-		err := framer.Run(ctx, conn, frames)
-		if err != nil {
-			slog.Error(err.Error())
-			return
-		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case frame := <-frames:
-				evt, err := codec.Decode(frame)
-				if err != nil {
-					slog.Error(err.Error())
-				} else {
-					send(evt)
-				}
-			case <-time.After(30 * time.Second):
-				return
-			}
-
-		}
-	}()
 }

@@ -1,5 +1,10 @@
 package loglang
 
+import (
+	"context"
+	"log/slog"
+)
+
 func Map[I any, O any](mapper func(I) O, orig []I) []O {
 	changed := make([]O, 0, len(orig))
 	for _, v := range orig {
@@ -36,4 +41,10 @@ func Coalesce(args ...any) any {
 type NamedEntity[T any] struct {
 	Value T
 	Name  string
+}
+
+func loggerFromContext(ctx context.Context) *slog.Logger {
+	return slog.Default().
+		With("pipeline", ctx.Value("pipeline")).
+		With("plugin", ctx.Value("plugin"))
 }
