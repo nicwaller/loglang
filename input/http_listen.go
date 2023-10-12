@@ -18,8 +18,8 @@ func HttpListener(port int, opts HttpListenerOptions) loglang.InputPlugin {
 		opts: opts,
 	}
 	// FIXME: this needs to be more global?
-	h.Framing = []loglang.FramingPlugin{framing.Whole()}
-	h.Codec = codec.Json()
+	h.Framing = []loglang.FramingPlugin{framing.Lines()}
+	h.Codec = codec.Auto()
 	return h
 }
 
