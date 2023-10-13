@@ -15,17 +15,12 @@ A delimiter is some kind of sequence that occurs between records.
 - Regular Expressions can be used to pick records out of a stream.
 - [COBS](https://en.m.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing)
 
-## Vector-based
+## Header-based
 
-Vector-based framing avoids delimiters by putting the length of the frame at the beginning of the frame.
+Header-based framing avoids delimiters by putting the length of the frame at the beginning of the frame. The length of the frame is encoded in a sequence of bytes at the beginning of the frame. Often 4 bytes, sometimes less. Also known as _Pascal Strings_.
 
-- Vector Prefix. The length of the frame is encoded in a sequence of bytes at the beginning of the frame. Often 4 bytes, sometimes less. Also known as _Pascal Strings_.
-- Fixed Width. Every record is the same size. This has the nice characteristic where it's easy to jump to any point in a file and be sure you're at the start of a record.
+## Fixed Width
+
+Every record is the same size. This has the nice characteristic where it's easy to jump to any point in a file and be sure you're at the start of a record.
 
 Wen packing multiple Protobuf records into a single file, vector-based framing is the [usual](https://seb-nyberg.medium.com/length-delimited-protobuf-streams-a39ebc4a4565) choice. 
-
-## Other
-
-We might want these other classes for completeness.
-
-- Greedy (read all the available data)
