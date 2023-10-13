@@ -17,3 +17,7 @@ https://vector.dev
 # Amazon EventBridge Pipes
 
 https://aws.amazon.com/eventbridge/pipes/
+
+# Seq
+
+https://docs.datalust.co/v2023.2/docs
