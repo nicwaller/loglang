@@ -6,7 +6,6 @@ import (
 	"github.com/nicwaller/loglang"
 	"os"
 	"strings"
-	"time"
 )
 
 // Syslog V0
@@ -40,7 +39,7 @@ func (p *syslogV0) Encode(event loglang.Event) ([]byte, error) {
 	buf.WriteString(fmt.Sprintf("<%d>", priority))
 
 	// PART 2 - HEADER
-	buf.WriteString(syslogHeader())
+	buf.WriteString(syslogHeader(event.Field("@timestamp").GetString()))
 
 	// PART 3 - MESSAGE
 	tag := "" // is there a best field for tag?
@@ -69,9 +68,9 @@ func syslogPriority(facility int8, severity int8) int8 {
 	return facility*8 + severity
 }
 
-func syslogHeader() string {
+func syslogHeader(timestamp string) string {
 	//Timestamp = Mmm dd hh:mm:ss
-	timestamp := time.Now().Format("Jan _2 15:04:05")
+	//timestamp := time.Now().Format("Jan _2 15:04:05")
 	hostname, err := os.Hostname()
 	if err != nil {
 		// TODO: discover IPv4 or IPv6 address

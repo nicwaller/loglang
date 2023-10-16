@@ -27,8 +27,12 @@ func (p *whole) Extract(_ context.Context, streams <-chan io.Reader, out chan<- 
 
 	// check to see if we've been given too many packets on the channel
 	select {
-	case <-streams:
-		return fmt.Errorf("whole() framing got multiple packets but expected only one")
+	case _, more := <-streams:
+		if more {
+			return fmt.Errorf("whole() framing got multiple packets but expected only one")
+		} else {
+			return nil
+		}
 	case <-time.After(time.Second):
 		return nil
 	}
