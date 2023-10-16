@@ -35,7 +35,7 @@ func (p *autoCodec) Decode(dat []byte) (loglang.Event, error) {
 		c.schema = loglang.SchemaFlat
 		return c.Decode(dat)
 	} else {
-		var c kvCodec
+		c := Plain("message")
 		return c.Decode(dat)
 	}
 }

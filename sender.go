@@ -61,6 +61,7 @@ func (s *SimpleSender) Send(events ...*Event) *BatchResult {
 }
 
 func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream io.Reader) (*BatchResult, error) {
+	slog.Debug("          SimpleSender.SendRaw()", "e2e", s.e2e)
 	// FIXME: make better decisions about what framing/codec to use
 	// like, it should be a variable on the struct
 	//return s.SendWithFramingCodec(template, framing.Lines(), codec.Auto(), byteStream)
@@ -94,26 +95,42 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 			b.batchSize = count
 		}()
 
+		// FIXME: count is not known ahead of time so batch exits early when it should not
+		slog.Debug("          SimpleSender.SendRaw() returned")
 		return b.waitForResults()
 	} else {
 		// get started for real
 		events := make(chan *Event)
 		go func() {
+			slog.Debug("            SimpleSender.SendRaw().goroutine")
 			// TODO: use request context or sender context?
 			//err := s.extract(s.ctx, template, byteStream, events)
 			err := s.extract(ctx, template, byteStream, events)
+			slog.Debug("            SimpleSender.SendRaw().goroutine extract done")
 			if err != nil {
 				slog.Error("error", "error", err)
 			}
+			close(events)
+			slog.Debug("            SimpleSender.SendRaw().goroutine completed")
 		}()
 
-		go func() {
-			for evt := range events {
-				evt.Merge(template, false)
-				s.events <- evt
+		//go func() {
+		slog.Debug("            SimpleSender.SendRaw().eventLoop")
+		for evt := range events {
+			evt.Merge(template, false)
+			select {
+			case s.events <- evt:
+				// this space left intentionally blank
+				// this is an unconditional non-blocking write
+				// but... why?
+			case <-time.After(100 * time.Millisecond):
+				slog.Warn("timeout")
 			}
-		}()
+		}
+		slog.Debug("            SimpleSender.SendRaw().eventLoop finished")
+		//}()
 
+		slog.Debug("          SimpleSender.SendRaw() returned")
 		return nil, nil
 	}
 }

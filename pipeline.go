@@ -3,6 +3,7 @@ package loglang
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"log/slog"
@@ -53,12 +54,13 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 }
 
 type Pipeline struct {
-	Name    string
-	inputs  []NamedEntity[inputDetail]
-	filters []NamedEntity[FilterPlugin]
-	outputs []NamedEntity[OutputPlugin]
-	opts    PipelineOptions
-	stop    context.CancelFunc
+	Name         string
+	inputs       []NamedEntity[inputDetail]
+	filters      []NamedEntity[FilterPlugin]
+	outputs      []NamedEntity[OutputPlugin]
+	opts         PipelineOptions
+	stop         context.CancelCauseFunc
+	OnCompletion func()
 }
 
 type PipelineOptions struct {
@@ -79,13 +81,14 @@ func (p *Pipeline) GetName() string {
 	return p.Name
 }
 
-const ChanBufferSize = 2
+const ChanBufferSize = 0
 
 // TODO: Inputs and Outputs should have codecs for converting between original and []byte
 
 func (p *Pipeline) Run() error {
+	slog.Debug("  Pipeline.Run()")
 	ctx := context.Background()
-	ctx, p.stop = context.WithCancel(ctx)
+	ctx, p.stop = context.WithCancelCause(ctx)
 	ctx = context.WithValue(ctx, "pipeline", p.GetName())
 	ctx = context.WithValue(ctx, "schema", p.opts.Schema)
 
@@ -103,17 +106,22 @@ func (p *Pipeline) Run() error {
 	RunFilterChain(ctx, p.filters, combinedInputs, outChan, true)
 	log.Info(fmt.Sprintf("set up %d filters", len(p.filters)))
 
-	if err := p.runOutputs(ctx, outChan); err != nil {
+	if err := p.runOutputsBackground(ctx, outChan); err != nil {
 		return err
 	}
 
-	if err := p.runInputs(ctx, combinedInputs); err != nil {
+	if err := p.runInputsBackground(ctx, combinedInputs); err != nil {
 		return err
 	}
 
 	<-ctx.Done()
-	log.Info("stopping pipeline")
+	log.Info("stopping pipeline", "cause", context.Cause(ctx))
 
+	// leave enough time for context cancellation to propagate
+	// so that "stopping filter chain" gets included in the logs
+	time.Sleep(50 * time.Millisecond)
+
+	slog.Debug("  Pipeline.Run() returned")
 	return nil
 }
 
@@ -122,18 +130,22 @@ func (p *Pipeline) Stop() {
 	log = log.With("pipeline", p.GetName())
 
 	log.Info("pipeline stop requested")
-	p.stop()
+	p.stop(fmt.Errorf("pipeline stop requested"))
 }
 
 // TODO: should this function be runInput (singular) for readability?
-func (p *Pipeline) runInputs(pipelineContext context.Context, combinedInputs chan *Event) error {
+func (p *Pipeline) runInputsBackground(pipelineContext context.Context, combinedInputs chan *Event) error {
 	pipelineLog := slog.With("pipeline", pipelineContext.Value("pipeline"))
 	pipelineLog.Debug("starting inputs")
+	slog.Debug("    Pipeline.runInputsBackground()")
+
+	var allInputsComplete sync.WaitGroup
 
 	for _, entity := range p.inputs {
 		plugin := entity.Value.plugin
 		pluginName := entity.Name
 
+		allInputsComplete.Add(1)
 		pluginContext := context.WithValue(pipelineContext, "plugin", pluginName)
 		log := loggerFromContext(pluginContext)
 
@@ -143,6 +155,7 @@ func (p *Pipeline) runInputs(pipelineContext context.Context, combinedInputs cha
 		log.Info("starting input")
 		go func() {
 			//events := make(chan *Event)
+			slog.Debug("      Pipeline.runInputsBackground().goroutine")
 			sender := NewSender(pluginContext, inChan, plugin.Extract, len(p.outputs))
 			err := plugin.Run(pluginContext, sender)
 			if err != nil {
@@ -150,14 +163,22 @@ func (p *Pipeline) runInputs(pipelineContext context.Context, combinedInputs cha
 			} else {
 				log.Info("input stopped")
 			}
+			allInputsComplete.Done()
+			slog.Debug("      Pipeline.runInputsBackground().goroutine done")
 		}()
 	}
+	go func() {
+		allInputsComplete.Wait()
+		p.stop(fmt.Errorf("all inputs complete"))
+	}()
+	slog.Debug("    Pipeline.runInputsBackground() returned")
 	return nil
 }
 
-func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
+func (p *Pipeline) runOutputsBackground(ctx context.Context, events chan *Event) error {
 	log := slog.With("pipeline", ctx.Value("pipeline"))
 	log.Debug("starting outputs")
+	log.Debug("    Pipeline.runOutputsBackground()")
 
 	// set up an output channel for each output
 	outputChannels := make([]chan *Event, len(p.outputs))
@@ -183,6 +204,7 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
 	go func() {
 		log := slog.Default()
 		log = log.With("pipeline", p.GetName())
+		log.Debug("      Pipeline.runOutputsBackground().fanOut")
 	fanOut:
 		for {
 			select {
@@ -198,7 +220,7 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
 				break fanOut
 			}
 		}
-		log.Debug("halted fan-out")
+		log.Debug("      Pipeline.runOutputsBackground().fanOut loop completed")
 	}()
 
 	for i, namedOutput := range p.outputs {
@@ -212,6 +234,7 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
 
 		log.Info("starting output")
 		go func() {
+			log.Debug("      Pipeline.runOutputsBackground().outputPump")
 		outputPump:
 			for {
 				select {
@@ -232,8 +255,10 @@ func (p *Pipeline) runOutputs(ctx context.Context, events chan *Event) error {
 					break outputPump
 				}
 			}
+			log.Debug("      Pipeline.runOutputsBackground().outputPump loop completed")
 		}()
 	}
+	log.Debug("    Pipeline.runOutputsBackground() returned")
 	return nil
 }
 
@@ -329,7 +354,7 @@ func RunFilterChain(ctx context.Context, filters []NamedEntity[FilterPlugin], or
 			case inEvt := <-allChannels[len(allChannels)-1]:
 				destination <- inEvt
 			case <-ctx.Done():
-				log.Info("stopping filter chain")
+				log.Info("stopping filter chain", "cause", context.Cause(ctx))
 				break filterForwarder
 			}
 		}

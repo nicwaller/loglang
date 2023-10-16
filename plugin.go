@@ -28,6 +28,7 @@ func (p *BaseInputPlugin) Run(_ context.Context, _ Sender) error {
 
 // Extract runs all the framing stages and codec. Output is a channel of decoded Events.
 func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader io.Reader, output chan *Event) error {
+	slog.Debug("              BaseInputPlugin.Extract()")
 	if p.Codec == nil {
 		panic("input codec must not be nil")
 	}
@@ -52,24 +53,44 @@ func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader i
 
 		// start producing frames
 		go func() {
+			slog.Debug("              BaseInputPlugin.Extract().goroutine")
 			err := stage.Extract(ctx, justOneReader, frames)
+			slog.Debug("                BaseInputPlugin.Extract().goroutine closed frames channel")
+			close(frames)
 			if err != nil {
 				log.Error("framing stage failed", "error", err)
 			}
+			slog.Debug("              BaseInputPlugin.Extract().goroutine completed")
 		}()
 		// consume those frames
-		for frame := range frames {
-			dat, err := io.ReadAll(frame)
-			if err != nil {
-				return fmt.Errorf("de-framing failed: %w", err)
+		contextCancelled := ctx.Done()
+		slog.Debug("                BaseInputPlugin.Extract().frameLoop started")
+	frameLoop:
+		for {
+			select {
+			case frame, b := <-frames:
+				if !b {
+					slog.Debug("                  BaseInputPlugin.Extract() frames channel closed")
+					break frameLoop
+				}
+				dat, err := io.ReadAll(frame)
+				if err != nil {
+					return fmt.Errorf("de-framing failed: %w", err)
+				}
+				slog.Debug("                  BaseInputPlugin.Extract() got a frame " + fmt.Sprintf("%d bytes", len(dat)))
+				evt, err := p.Codec.Decode(dat)
+				evt.Merge(template, false)
+				if err != nil {
+					return fmt.Errorf("frame decoding failed: %w", err)
+				}
+				output <- &evt
+			case <-contextCancelled:
+				fmt.Println("context cancelled")
+				break frameLoop
 			}
-			evt, err := p.Codec.Decode(dat)
-			evt.Merge(template, false)
-			if err != nil {
-				return fmt.Errorf("frame decoding failed: %w", err)
-			}
-			output <- &evt
 		}
+		slog.Debug("                BaseInputPlugin.Extract().frameLoop finished")
+		slog.Debug("              BaseInputPlugin.Extract() returned")
 		return nil
 
 	case 2, 3, 4:

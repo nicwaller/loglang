@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/nicwaller/loglang"
 	"io"
+	"log/slog"
 )
 
 //goland:noinspection GoUnusedExportedFunction
@@ -18,20 +19,28 @@ func Auto() loglang.FramingPlugin {
 type autoFraming struct{}
 
 func (p *autoFraming) Extract(ctx context.Context, streams <-chan io.Reader, out chan<- io.Reader) error {
+	slog.Debug("                  autoFraming.Extract()")
 	for {
 		select {
 
 		case nextStream, hasMoreStreams := <-streams:
 			// I'm not totally sure about this code.
 			if !hasMoreStreams {
+				fmt.Println("has no more streams")
 				return nil
 			}
 
 			// Peek at the first few bytes so we can auto-detect the framing
-			peek := make([]byte, 4)
-			_, err := io.ReadFull(nextStream, peek)
+			peek := make([]byte, 240)
+			//_, err := io.ReadFull(nextStream, peek)
+			n, err := nextStream.Read(peek)
+			slog.Debug("                  peeked at " + fmt.Sprintf("%d bytes", n))
 			if err != nil {
-				return err
+				if err.Error() == "unexpected EOF" {
+					// actually this is normal for short stdin segments
+				} else {
+					return err
+				}
 			}
 
 			// we don't need to do the decoding;
@@ -47,6 +56,8 @@ func (p *autoFraming) Extract(ctx context.Context, streams <-chan io.Reader, out
 			} else if peek[0] == 0x1e && peek[1] == 0x0f {
 				// detected magic bytes for chunked GELF
 				return fmt.Errorf("auto framing doesn't support chunked GELF")
+			} else if ix := bytes.IndexRune(peek, '\n'); ix > 0 && ix < 1000 {
+				mode = linesFramingMode
 			} else {
 				mode = wholeFramingMode
 			}
@@ -54,13 +65,14 @@ func (p *autoFraming) Extract(ctx context.Context, streams <-chan io.Reader, out
 
 			// derive a new Reader that includes the bytes we peeked at
 			fullStream := io.MultiReader(
-				bytes.NewReader(peek),
+				bytes.NewReader(peek[:n]),
 				nextStream,
 			)
 
 			// handle each case
 			switch mode {
 			case linesFramingMode:
+				slog.Debug("                    autoFraming.Extract() mode = lines")
 				s := bufio.NewScanner(fullStream)
 				for s.Scan() {
 					out <- bytes.NewReader(s.Bytes())
@@ -86,7 +98,11 @@ func (p *autoFraming) Extract(ctx context.Context, streams <-chan io.Reader, out
 				out <- fullStream
 			}
 
+			slog.Debug("                  autoFraming.Extract() returned")
+			return nil
+
 		case <-ctx.Done():
+			slog.Debug("                  autoFraming.Extract() returned")
 			return nil
 
 		}

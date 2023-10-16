@@ -36,6 +36,8 @@ func (p *stdOut) sendOne(event *loglang.Event) error {
 	if err != nil {
 		return err
 	}
+	// PERF: might want to use buffered output to go faster
+	// but be careful about flushing the buffer before exit
 	_, err = os.Stdout.Write(dat)
 	_, err = os.Stdout.Write([]byte("\n"))
 	if err != nil {
