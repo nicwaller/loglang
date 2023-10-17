@@ -2,8 +2,10 @@ package output
 
 import (
 	"context"
+	"fmt"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
+	"log/slog"
 	"os"
 )
 
@@ -32,6 +34,10 @@ func (p *stdOut) Send(_ context.Context, events []*loglang.Event) error {
 }
 
 func (p *stdOut) sendOne(event *loglang.Event) error {
+	if event == nil {
+		slog.Error("output[stdout].sendOne() saw nil event")
+		return fmt.Errorf("nil event")
+	}
 	dat, err := p.opts.Codec.Encode(*event)
 	if err != nil {
 		return err

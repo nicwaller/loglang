@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
+	"time"
 )
 
 type InputPlugin interface {
@@ -28,15 +28,14 @@ func (p *BaseInputPlugin) Run(_ context.Context, _ Sender) error {
 
 // Extract runs all the framing stages and codec. Output is a channel of decoded Events.
 func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader io.Reader, output chan *Event) error {
-	slog.Debug("              BaseInputPlugin.Extract()")
 	if p.Codec == nil {
 		panic("input codec must not be nil")
 	}
 
-	log := slog.Default().With(
-		"pipeline", ctx.Value("pipeline"),
-		"plugin", ctx.Value("plugin"),
-	)
+	var stop context.CancelCauseFunc
+	ctx, stop = context.WithCancelCause(ctx)
+	ctx = context.WithValue(ctx, ContextKeyPluginType, "BaseInputPlugin")
+	log := ContextLogger(ctx)
 
 	switch len(p.Framing) {
 	case 0:
@@ -44,54 +43,51 @@ func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader i
 		panic("no framing configured on input plugin")
 
 	case 1:
-		stage := p.Framing[0]
-		// The happy path is exactly one level of framing
-		// because we exactly one io.Reader to think about
-		justOneReader := make(chan io.Reader, 1)
-		justOneReader <- reader
-		frames := make(chan io.Reader)
+		// collect chunks from the reader
+		chunks := make(chan []byte)
+		go PumpReader(ctx, stop, reader, chunks)
 
-		// start producing frames
+		// the framing stage will normalize those into whole frames
+		stage := p.Framing[0]
+		frames := make(chan []byte)
 		go func() {
-			slog.Debug("              BaseInputPlugin.Extract().goroutine")
-			err := stage.Extract(ctx, justOneReader, frames)
-			slog.Debug("                BaseInputPlugin.Extract().goroutine closed frames channel")
+			err := stage.Extract(ctx, chunks, frames)
 			close(frames)
 			if err != nil {
 				log.Error("framing stage failed", "error", err)
+				stop(err)
 			}
-			slog.Debug("              BaseInputPlugin.Extract().goroutine completed")
 		}()
-		// consume those frames
-		contextCancelled := ctx.Done()
-		slog.Debug("                BaseInputPlugin.Extract().frameLoop started")
-	frameLoop:
+
+		// run the decoder on those frames here in this thread
+		decoded := 0
+	decoderLoop:
 		for {
+			// should there be a timeout on this selecct?
 			select {
-			case frame, b := <-frames:
-				if !b {
-					slog.Debug("                  BaseInputPlugin.Extract() frames channel closed")
-					break frameLoop
+			case <-ctx.Done():
+				log.Debug("decoderLoop finished by context",
+					"cause", context.Cause(ctx),
+					"count", decoded)
+				break decoderLoop
+			case frame, more := <-frames:
+				if !more {
+					log.Debug("decoderLoop finished",
+						"cause", "frames channel closed",
+						"count", decoded)
+					break decoderLoop
 				}
-				dat, err := io.ReadAll(frame)
-				if err != nil {
-					return fmt.Errorf("de-framing failed: %w", err)
-				}
-				slog.Debug("                  BaseInputPlugin.Extract() got a frame " + fmt.Sprintf("%d bytes", len(dat)))
-				evt, err := p.Codec.Decode(dat)
+				evt, err := p.Codec.Decode(frame)
 				evt.Merge(template, false)
 				if err != nil {
 					return fmt.Errorf("frame decoding failed: %w", err)
 				}
 				output <- &evt
-			case <-contextCancelled:
-				fmt.Println("context cancelled")
-				break frameLoop
+				decoded++
+			case <-time.After(time.Second * 2):
+				log.Debug("decoderLoop timeout", "count", decoded)
 			}
 		}
-		slog.Debug("                BaseInputPlugin.Extract().frameLoop finished")
-		slog.Debug("              BaseInputPlugin.Extract() returned")
-		return nil
 
 	case 2, 3, 4:
 		// we should be prepared for multiple levels of framing
@@ -123,10 +119,11 @@ type CodecPlugin interface {
 }
 
 type FramingPlugin interface {
-	// return type must be io.Reader
-	// usually framing returns single events (small)
-	// but it might also be decompression of a 5GB object in S3
-	Extract(context.Context, <-chan io.Reader, chan<- io.Reader) error
-	Frameup(context.Context, <-chan io.Reader, io.Writer) error
-	// the lack of symmetry here feels very weird to me -NW
+	// I tried using io.Reader and io.Writer but because they use fixed buffers,
+	// they had problems if the frame size exceeded the buffer size.
+	Extract(ctx context.Context, input <-chan []byte, output chan<- []byte) error
+	Frameup(ctx context.Context, input <-chan []byte, output chan<- []byte) error
+	// TODO: wish I had better names for these functions
 }
+
+const MaxFrameSize = 65536

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/nicwaller/loglang"
 	"io"
+	"log/slog"
 )
 
 //goland:noinspection GoUnusedExportedFunction
@@ -15,58 +17,50 @@ func Lines() loglang.FramingPlugin {
 
 type lines struct{}
 
-func (p *lines) Extract(ctx context.Context, streams <-chan io.Reader, out chan<- io.Reader) error {
-	var streamScanner *bufio.Scanner
+func (p *lines) Extract(ctx context.Context, input <-chan []byte, output chan<- []byte) (retErr error) {
+	var stop context.CancelCauseFunc
+	ctx, stop = context.WithCancelCause(ctx)
+	log := loglang.ContextLogger(ctx)
 
-	for {
+	scannable, writeInputFrames := io.Pipe()
+	go loglang.PumpChannel(ctx, stop, input, writeInputFrames)
+
+	streamScanner := bufio.NewScanner(scannable)
+	log.Info("started scanLoop")
+	running := true
+scanLoop:
+	for running {
 		select {
-
-		case nextStream, hasMoreStreams := <-streams:
-			// I'm not totally sure about this code.
-			if !hasMoreStreams {
-				return nil
-			}
-			streamScanner = bufio.NewScanner(nextStream)
-		scanLoop:
-			for {
-				select {
-				case <-ctx.Done():
-					break scanLoop
-				default:
-					scannerHasMore := streamScanner.Scan()
-					if !scannerHasMore {
-						break scanLoop
-					}
-					// PERF: allocating new reader for every line feels wasteful
-					out <- bytes.NewReader(streamScanner.Bytes())
-				}
-			}
-
 		case <-ctx.Done():
-			return nil
-
+			break scanLoop
+		default:
+			running = streamScanner.Scan()
+			output <- streamScanner.Bytes()
 		}
 	}
+	log.Info("stopped scanLoop")
+	return
 }
 
-func (p *lines) Frameup(ctx context.Context, packets <-chan io.Reader, out io.Writer) error {
+func (p *lines) Frameup(ctx context.Context, input <-chan []byte, output chan<- []byte) error {
+framingLoop:
 	for {
 		select {
-
-		case packet := <-packets:
-			// FIXME: we should verify the packet doesn't contain \n otherwise the output stream will be corrupted
-			_, err := io.Copy(out, packet)
-			if err != nil {
-				return err
-			}
-			_, err = out.Write([]byte{'\n'})
-			if err != nil {
-				return err
-			}
-
 		case <-ctx.Done():
 			return nil
-
+		default:
+		case frame, more := <-input:
+			if !more {
+				slog.Debug("framingLoop saw closed channel")
+				break framingLoop
+			}
+			const linefeed = byte('\n')
+			if bytes.IndexByte(frame, linefeed) > 0 {
+				return fmt.Errorf("cannot safely encode frames that contain a linefeed")
+			}
+			frameLF := append(frame, linefeed)
+			output <- frameLF
 		}
 	}
+	return nil
 }

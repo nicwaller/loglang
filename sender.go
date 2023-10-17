@@ -61,7 +61,8 @@ func (s *SimpleSender) Send(events ...*Event) *BatchResult {
 }
 
 func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream io.Reader) (*BatchResult, error) {
-	slog.Debug("          SimpleSender.SendRaw()", "e2e", s.e2e)
+	log := ContextLogger(ctx)
+
 	// FIXME: make better decisions about what framing/codec to use
 	// like, it should be a variable on the struct
 	//return s.SendWithFramingCodec(template, framing.Lines(), codec.Auto(), byteStream)
@@ -81,7 +82,7 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 			//err := s.extract(s.ctx, template, byteStream, events)
 			err := s.extract(ctx, template, byteStream, events)
 			if err != nil {
-				slog.Error("error", "error", err)
+				log.Error("error", "error", err)
 			}
 		}()
 
@@ -96,27 +97,27 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 		}()
 
 		// FIXME: count is not known ahead of time so batch exits early when it should not
-		slog.Debug("          SimpleSender.SendRaw() returned")
-		return b.waitForResults()
+		result, err := b.waitForResults()
+		close(s.events)
+		return result, err
 	} else {
 		// get started for real
 		events := make(chan *Event)
 		go func() {
-			slog.Debug("            SimpleSender.SendRaw().goroutine")
 			// TODO: use request context or sender context?
 			//err := s.extract(s.ctx, template, byteStream, events)
 			err := s.extract(ctx, template, byteStream, events)
-			slog.Debug("            SimpleSender.SendRaw().goroutine extract done")
 			if err != nil {
 				slog.Error("error", "error", err)
 			}
 			close(events)
-			slog.Debug("            SimpleSender.SendRaw().goroutine completed")
 		}()
 
-		//go func() {
-		slog.Debug("            SimpleSender.SendRaw().eventLoop")
 		for evt := range events {
+			if evt == nil {
+				log.Error("SendRaw saw nil event")
+				continue
+			}
 			evt.Merge(template, false)
 			select {
 			case s.events <- evt:
@@ -124,44 +125,44 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 				// this is an unconditional non-blocking write
 				// but... why?
 			case <-time.After(100 * time.Millisecond):
-				slog.Warn("timeout")
+				log.Warn("timeout")
 			}
 		}
-		slog.Debug("            SimpleSender.SendRaw().eventLoop finished")
-		//}()
+		close(s.events)
 
-		slog.Debug("          SimpleSender.SendRaw() returned")
 		return nil, nil
 	}
 }
 
 func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event, f FramingPlugin, c CodecPlugin, byteStream io.Reader) (*BatchResult, error) {
+	var stop context.CancelCauseFunc
+	ctx, stop = context.WithCancelCause(ctx)
+	ctx = context.WithValue(ctx, ContextKeyPluginType, "SimpleSender")
+	log := ContextLogger(ctx)
+
 	if s.e2e {
 		// prepare the batch
 		b := newBatch(-1, s.fanout)
 		count := 0
 
-		// get started for real
-		oneReader := make(chan io.Reader, 1)
-		frames := make(chan io.Reader)
-		oneReader <- byteStream
+		// collect chunks from the reader
+		chunks := make(chan []byte)
+		go PumpReader(ctx, stop, byteStream, chunks)
+
+		// the framing stage will normalize those into whole frames
+		stage := f
+		frames := make(chan []byte)
+
 		go func() {
-			// TODO: use request context or sender context?
-			//err := f.Extract(s.ctx, oneReader, frames)
-			err := f.Extract(ctx, oneReader, frames)
+			err := stage.Extract(ctx, chunks, frames)
 			if err != nil {
-				slog.Error("error", "error", err)
+				log.Error("framing stage failed", "error", err)
+				stop(err)
 			}
 		}()
 
-		//done := make(chan bool)
-		//failed := make(chan error)
 		go func() {
-			for frameReader := range frames {
-				frameData, err := io.ReadAll(frameReader)
-				if err != nil {
-					//failed <- err
-				}
+			for frameData := range frames {
 				evt, err := c.Decode(frameData)
 				if err != nil {
 					//failed <- err
@@ -172,37 +173,36 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 				count++
 			}
 			b.batchSize = count
-			//done <- true
 		}()
 
 		return b.waitForResults()
 	} else {
-		// get started for real
-		oneReader := make(chan io.Reader, 1)
-		frames := make(chan io.Reader)
-		oneReader <- byteStream
+		// collect chunks from the reader
+		chunks := make(chan []byte)
+		go PumpReader(ctx, stop, byteStream, chunks)
+
+		// the framing stage will normalize those into whole frames
+		stage := f
+		frames := make(chan []byte)
 		go func() {
-			// TODO: use request context or sender context?
-			//err := f.Extract(s.ctx, oneReader, frames)
-			err := f.Extract(ctx, oneReader, frames)
+			err := stage.Extract(ctx, chunks, frames)
 			if err != nil {
-				slog.Error("error", "error", err)
+				log.Error("framing stage failed", "error", err)
+				stop(err)
 			}
 		}()
 
-		for frameReader := range frames {
-			// FIXME: this doesn't end when using .Whole()?
-			frameData, err := io.ReadAll(frameReader)
-			if err != nil {
-				return nil, err
-			}
+		//go func() {
+		for frameData := range frames {
 			evt, err := c.Decode(frameData)
 			if err != nil {
-				return nil, err
+				//failed <- err
 			}
 			evt.Merge(template, false)
 			s.events <- &evt
 		}
+		//}()
+
 		return nil, nil
 	}
 }

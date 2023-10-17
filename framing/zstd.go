@@ -1,29 +1,27 @@
 package framing
 
 import (
-	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"github.com/nicwaller/loglang"
 	"io"
 )
 
 //goland:noinspection GoUnusedExportedFunction
-func Gzip() loglang.FramingPlugin {
-	return &gzipFraming{}
+func Zstd() loglang.FramingPlugin {
+	return &zstdFraming{}
 }
 
-type gzipFraming struct{}
+type zstdFraming struct{}
 
-func (p *gzipFraming) Extract(ctx context.Context, input <-chan []byte, output chan<- []byte) (retErr error) {
+func (p *zstdFraming) Extract(ctx context.Context, input <-chan []byte, output chan<- []byte) (retErr error) {
 	var stop context.CancelCauseFunc
 	ctx, stop = context.WithCancelCause(ctx)
-	ctx = context.WithValue(ctx, loglang.ContextKeyPluginType, "framing[gzip]")
-	log := loglang.ContextLogger(ctx)
+	ctx = context.WithValue(ctx, loglang.ContextKeyPluginType, "framing[zlib]")
 
 	pipeReader, pipeWriter := io.Pipe()
-	subreader, err := gzip.NewReader(pipeReader)
+	subreader, err := zlib.NewReader(pipeReader)
 	if err != nil {
-		log.Error("failed to create gzip reader")
 		return err
 	}
 
@@ -34,13 +32,13 @@ func (p *gzipFraming) Extract(ctx context.Context, input <-chan []byte, output c
 	return
 }
 
-func (p *gzipFraming) Frameup(ctx context.Context, input <-chan []byte, output chan<- []byte) (retErr error) {
+func (p *zstdFraming) Frameup(ctx context.Context, input <-chan []byte, output chan<- []byte) (retErr error) {
 	var stop context.CancelCauseFunc
 	ctx, stop = context.WithCancelCause(ctx)
-	ctx = context.WithValue(ctx, loglang.ContextKeyPluginType, "framing[gzip]")
+	ctx = context.WithValue(ctx, loglang.ContextKeyPluginType, "framing[zlib]")
 
 	readCompressed, pipeWriter := io.Pipe()
-	writePlain, retErr := gzip.NewWriterLevel(pipeWriter, gzip.BestSpeed)
+	writePlain, retErr := zlib.NewWriterLevel(pipeWriter, zlib.BestSpeed)
 	if retErr != nil {
 		return
 	}

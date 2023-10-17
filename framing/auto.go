@@ -3,12 +3,13 @@ package framing
 import (
 	"bufio"
 	"bytes"
+	"compress/bzip2"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"fmt"
 	"github.com/nicwaller/loglang"
 	"io"
-	"log/slog"
 )
 
 //goland:noinspection GoUnusedExportedFunction
@@ -18,110 +19,115 @@ func Auto() loglang.FramingPlugin {
 
 type autoFraming struct{}
 
-func (p *autoFraming) Extract(ctx context.Context, streams <-chan io.Reader, out chan<- io.Reader) error {
-	slog.Debug("                  autoFraming.Extract()")
-	for {
-		select {
+func (p *autoFraming) Extract(ctx context.Context, rawInput <-chan []byte, output chan<- []byte) (exErr error) {
+	var stop context.CancelCauseFunc
+	ctx, stop = context.WithCancelCause(ctx)
+	//log := loglang.ContextLogger(ctx)
 
-		case nextStream, hasMoreStreams := <-streams:
-			// I'm not totally sure about this code.
-			if !hasMoreStreams {
-				fmt.Println("has no more streams")
-				return nil
-			}
+	// need to read enough to find index of the first \n in most cases
+	const peekSize = 240
 
-			// Peek at the first few bytes so we can auto-detect the framing
-			peek := make([]byte, 240)
-			//_, err := io.ReadFull(nextStream, peek)
-			n, err := nextStream.Read(peek)
-			slog.Debug("                  peeked at " + fmt.Sprintf("%d bytes", n))
-			if err != nil {
-				if err.Error() == "unexpected EOF" {
-					// actually this is normal for short stdin segments
-				} else {
-					return err
-				}
-			}
+	pipeReader, pipeWriter := io.Pipe()
+	go loglang.PumpChannel(ctx, stop, rawInput, pipeWriter)
 
-			// we don't need to do the decoding;
-			// we just need to cut the byte stream into frames
-			var mode autoFramingMode
-			if peek[0] == '-' && peek[1] == '-' && peek[2] == '-' {
-				mode = yamlFramingMode
-			} else if peek[0] == '{' {
-				// json-lines is a common pattern
-				mode = linesFramingMode
-			} else if peek[0] == 0x1f && peek[1] == 0x8b {
-				mode = gzipFramingMode
-			} else if peek[0] == 0x1e && peek[1] == 0x0f {
-				// detected magic bytes for chunked GELF
-				return fmt.Errorf("auto framing doesn't support chunked GELF")
-			} else if ix := bytes.IndexRune(peek, '\n'); ix > 0 && ix < 1000 {
-				mode = linesFramingMode
-			} else {
-				mode = wholeFramingMode
-			}
-			// TODO: what are bzip magic bytes?
-
-			// derive a new Reader that includes the bytes we peeked at
-			fullStream := io.MultiReader(
-				bytes.NewReader(peek[:n]),
-				nextStream,
-			)
-
-			// handle each case
-			switch mode {
-			case linesFramingMode:
-				slog.Debug("                    autoFraming.Extract() mode = lines")
-				s := bufio.NewScanner(fullStream)
-				for s.Scan() {
-					out <- bytes.NewReader(s.Bytes())
-				}
-			case yamlFramingMode:
-				s := bufio.NewScanner(fullStream)
-				s.Split(scanYaml)
-				for s.Scan() {
-					// PERF: no need to read this into memory
-					document := s.Bytes()
-					out <- bytes.NewReader(document)
-				}
-			case gzipFramingMode:
-				gzipReader, err := gzip.NewReader(fullStream)
-				if err != nil {
-					// TODO: we should probably just try some other framing
-					return err
-				}
-				out <- gzipReader
-			case wholeFramingMode:
-				out <- fullStream
-			default:
-				out <- fullStream
-			}
-
-			slog.Debug("                  autoFraming.Extract() returned")
-			return nil
-
-		case <-ctx.Done():
-			slog.Debug("                  autoFraming.Extract() returned")
-			return nil
-
+	// TODO: try to make a decision with every packet of data that arrives?
+	input := bufio.NewReaderSize(pipeReader, peekSize)
+	// FIXME: how can I peek at a longer prelude without blocking? that makes no sense.
+	//peek, err := input.Peek(peekSize)
+	peek, err := input.Peek(10)
+	if err != nil {
+		if err.Error() == "unexpected EOF" {
+			// actually this is normal for short stdin segments
+		} else {
+			return err
 		}
 	}
+
+	// we don't need to do the decoding;
+	// we just need to cut the byte stream into frames
+	var mode autoFramingMode
+	if peek[0] == '-' && peek[1] == '-' && peek[2] == '-' {
+		mode = yamlFramingMode
+	} else if peek[0] == '{' {
+		// json-lines is a common pattern
+		mode = linesFramingMode
+	} else if peek[0] == 0x1f && peek[1] == 0x8b {
+		mode = gzipFramingMode
+	} else if peek[0] == 0x1e && peek[1] == 0x0f {
+		// detected magic bytes for chunked GELF
+		return fmt.Errorf("auto framing doesn't support chunked GELF")
+	} else if ix := bytes.IndexRune(peek, '\n'); ix > 0 && ix < 1000 {
+		mode = linesFramingMode
+	} else {
+		mode = wholeFramingMode
+	}
+	// TODO: what are bzip magic bytes?
+
+	running := true
+	go func() {
+		// PERF: do we actually leak a goroutine here?
+		<-ctx.Done()
+		running = false
+	}()
+
+	// handle each case
+	switch mode {
+	case linesFramingMode:
+		s := bufio.NewScanner(input)
+		for running && s.Scan() {
+			output <- s.Bytes()
+		}
+	case yamlFramingMode:
+		s := bufio.NewScanner(input)
+		s.Split(scanYaml)
+		for running && s.Scan() {
+			output <- s.Bytes()
+		}
+	case gzipFramingMode:
+		var subreader io.Reader
+		subreader, exErr = gzip.NewReader(input)
+		if exErr != nil {
+			return
+		}
+		loglang.PumpReader(ctx, stop, subreader, output)
+		return
+	case bzipFramingMode:
+		var subreader io.Reader
+		subreader = bzip2.NewReader(input)
+		loglang.PumpReader(ctx, stop, subreader, output)
+		return
+	case zstdFramingMode:
+		var subreader io.Reader
+		subreader, exErr = zlib.NewReader(input)
+		if exErr != nil {
+			return
+		}
+		loglang.PumpReader(ctx, stop, subreader, output)
+		return
+	case wholeFramingMode:
+		loglang.PumpReader(ctx, stop, input, output)
+		return
+	default:
+		loglang.PumpReader(ctx, stop, input, output)
+		return
+	}
+
+	return nil
 }
 
-func (p *autoFraming) Frameup(_ context.Context, _ <-chan io.Reader, _ io.Writer) error {
+func (p *autoFraming) Frameup(_ context.Context, _ <-chan []byte, _ chan<- []byte) error {
 	panic("auto framing is only for receiving")
 }
 
-type autoFramingMode int8
+type autoFramingMode string
 
 const (
-	wholeFramingMode autoFramingMode = iota
-	linesFramingMode autoFramingMode = iota
-	yamlFramingMode  autoFramingMode = iota
-	gzipFramingMode  autoFramingMode = iota
-	//bzipFramingMode  autoFramingMode = iota
-	//zstdFramingMode  autoFramingMode = iota
+	wholeFramingMode autoFramingMode = "whole"
+	linesFramingMode autoFramingMode = "lines"
+	yamlFramingMode  autoFramingMode = "yaml"
+	gzipFramingMode  autoFramingMode = "gzip"
+	bzipFramingMode  autoFramingMode = "bzip"
+	zstdFramingMode  autoFramingMode = "zstd"
 )
 
 // for use with bufio.Scanner .Split()

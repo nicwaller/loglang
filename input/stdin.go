@@ -5,7 +5,6 @@ import (
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
 	"github.com/nicwaller/loglang/framing"
-	"log/slog"
 	"os"
 )
 
@@ -18,13 +17,14 @@ type stdInput struct {
 }
 
 func (p *stdInput) Run(ctx context.Context, sender loglang.Sender) (err error) {
-	slog.Debug("        stdInput.Run()")
 	// TODO: configure this elsewhere
 	p.Codec = codec.Auto()
-	p.Framing = []loglang.FramingPlugin{framing.Auto()}
+	//p.Framing = []loglang.FramingPlugin{framing.Auto()}
+	// automatic framing is hard with stdin (peek how many bytes?)
+
+	p.Framing = []loglang.FramingPlugin{framing.Lines()}
 	sender.SetE2E(false)
 	_, err = sender.SendRaw(ctx, p.eventTemplate(), os.Stdin)
-	slog.Debug("        stdInput.Run() returned")
 	return
 }
 

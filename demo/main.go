@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
@@ -15,7 +14,7 @@ import (
 
 func main() {
 	setupLogging()
-	slog.Debug("main()")
+	slog.Info("Starting up")
 
 	p := loglang.NewPipeline("demo", loglang.PipelineOptions{
 		MarkIngestionTime: false,
@@ -23,7 +22,7 @@ func main() {
 	})
 
 	p.OnCompletion = func() {
-		slog.Info("all inputs complete")
+		slog.Info("Goodbye")
 		time.Sleep(time.Second)
 	}
 
@@ -39,10 +38,12 @@ func main() {
 	//	//Codec:   codec.Json(),
 	//	//Schema:  loglang.SchemaLogstashECS,
 	//}))
+
 	p.Input("stdin", input.Stdin())
 	p.Output("stdout", output.StdOut(output.StdoutOptions{
 		Codec: codec.Json(),
 	}))
+
 	//p.Output("slack", output.Slack(output.SlackOptions{
 	//	BotToken:        os.Getenv("BOT_TOKEN"),
 	//	FallbackChannel: "test-3",
@@ -58,23 +59,23 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		<-c
-		fmt.Println() // ^C appears in terminal, and I want a newline after that to keep things clean
+		_, _ = os.Stderr.WriteString("\n") // ^C appears in terminal, and I want a newline after that to keep things clean
 		slog.Info("Caught Ctrl-C SIGINT")
-		p.Stop()
+		p.Stop("SIGINT")
 	}()
 
 	if err := p.Run(); err != nil {
 		slog.Error(err.Error())
 	}
-	slog.Debug("main() returned")
+	slog.Info("Exiting")
 }
 
 func setupLogging() {
 	// TODO: can we automatically switch to debug output when certain errors occur?
 	slog.SetDefault(slog.New(
 		tint.NewHandler(os.Stderr, &tint.Options{
-			//Level: slog.LevelDebug,
-			Level:      slog.LevelInfo,
+			Level: slog.LevelDebug,
+			//Level:      slog.LevelInfo,
 			TimeFormat: time.Kitchen,
 		}),
 	))
