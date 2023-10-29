@@ -2,16 +2,26 @@ package loglang
 
 import (
 	"sort"
+	"sync/atomic"
 )
 
 type Event struct {
 	Fields map[string]interface{}
-	batch  *publishingBatch
+
+	// the event may have been received as part of a batch with other events
+	// and we want to support end-to-end acknowledgement for the whole batch
+	batch *publishingBatch
+
+	// if using end-to-end acknowledgement, count finsihed output plugins
+	// when this reaches len(outputs) the event is fully delivered
+	// and the batch can be notified
+	finishedOutputs *atomic.Uint32
 }
 
 func NewEvent() Event {
 	var newEvt Event
 	newEvt.Fields = make(map[string]interface{})
+	newEvt.finishedOutputs = &atomic.Uint32{}
 	return newEvt
 }
 

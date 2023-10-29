@@ -23,7 +23,7 @@ func (p *stdInput) Run(ctx context.Context, sender loglang.Sender) (err error) {
 	// automatic framing is hard with stdin (peek how many bytes?)
 
 	p.Framing = []loglang.FramingPlugin{framing.Lines()}
-	sender.SetE2E(false)
+	sender.SetE2E(true)
 	_, err = sender.SendRaw(ctx, p.eventTemplate(), os.Stdin)
 	return
 }

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"log/slog"
 )
 
 func NewPipeline(name string, options PipelineOptions) *Pipeline {
@@ -18,12 +16,6 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 	}
 	if options.StalledInputThreshold == 0 {
 		options.StalledInputThreshold = 24 * time.Hour
-	}
-	if options.SlowBatchWarning == 0 {
-		options.SlowBatchWarning = 3 * time.Second
-	}
-	if options.BatchTimeout == 0 {
-		options.BatchTimeout = time.Minute
 	}
 
 	var p Pipeline
@@ -82,8 +74,6 @@ type PipelineOptions struct {
 	StalledOutputThreshold time.Duration
 	MarkIngestionTime      bool
 	Schema                 SchemaModel
-	SlowBatchWarning       time.Duration
-	BatchTimeout           time.Duration
 }
 
 type inputDetail struct {
@@ -172,6 +162,8 @@ func (p *Pipeline) runOutputs(events chan *Event) {
 		outputChannels[i] = make(chan *Event, 1)
 	}
 
+	var countOutputs uint32 = uint32(len(p.outputs))
+
 	for i, namedOutput := range p.outputs {
 		log := ContextLogger(p.ctx)
 
@@ -186,7 +178,8 @@ func (p *Pipeline) runOutputs(events chan *Event) {
 			if event.batch != nil {
 				if err != nil {
 					event.batch.errorHappened <- err
-				} else {
+				}
+				if countOutputs == event.finishedOutputs.Add(1) {
 					event.batch.outputBurndown <- 1
 				}
 			}

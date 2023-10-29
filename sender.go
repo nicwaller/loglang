@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"time"
 )
 
@@ -44,13 +43,15 @@ func NewSender(ctx context.Context, events chan *Event, extract Extractor, fanou
 
 func (s *SimpleSender) Send(events ...*Event) *BatchResult {
 	if s.e2e {
-		b := newBatch(len(events), s.fanout)
+		b := newBatch()
 		for _, event := range events {
 			event.batch = b
 			s.events <- event
 		}
+		counted := make(chan int, 1)
+		counted <- len(events)
 		// TODO: maybe don't ignore this error? log it?
-		result, _ := b.waitForResults()
+		result, _ := b.waitForResults(context.TODO(), counted)
 		return result
 	} else {
 		for _, event := range events {
@@ -60,6 +61,13 @@ func (s *SimpleSender) Send(events ...*Event) *BatchResult {
 	}
 }
 
+// treat the entire contents of io.Reader as a single batch
+// this can be useful, for example, when using S3+SQS
+// because the SQS event should not be acknowledged until the entire batch
+// of events from the S3 object has been fully written to all outputs
+//
+// function is named SendRaw because it's sending raw byte stream reader
+// deferring the framing and codec decisions to the pipeline configuration
 func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream io.Reader) (*BatchResult, error) {
 	log := ContextLogger(ctx)
 
@@ -72,7 +80,7 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 
 	if s.e2e {
 		// prepare the batch
-		b := newBatch(-1, s.fanout)
+		b := newBatch()
 		count := 0
 
 		// get started for real
@@ -86,6 +94,10 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 			}
 		}()
 
+		counted := make(chan int, 1)
+
+		// this needs to run in a goroutine to keep the channels open
+		// otherwise we'll deadlock (stuck channels)
 		go func() {
 			for evt := range events {
 				evt.Merge(template, false)
@@ -93,11 +105,10 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 				s.events <- evt
 				count++
 			}
-			b.batchSize = count
+			counted <- count
 		}()
 
-		// FIXME: count is not known ahead of time so batch exits early when it should not
-		result, err := b.waitForResults()
+		result, err := b.waitForResults(ctx, counted)
 		close(s.events)
 		return result, err
 	} else {
@@ -108,7 +119,7 @@ func (s *SimpleSender) SendRaw(ctx context.Context, template *Event, byteStream 
 			//err := s.extract(s.ctx, template, byteStream, events)
 			err := s.extract(ctx, template, byteStream, events)
 			if err != nil {
-				slog.Error("error", "error", err)
+				log.Error("error", "error", err)
 			}
 			close(events)
 		}()
@@ -142,7 +153,7 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 
 	if s.e2e {
 		// prepare the batch
-		b := newBatch(-1, s.fanout)
+		b := newBatch()
 		count := 0
 
 		// collect chunks from the reader
@@ -172,10 +183,11 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 				s.events <- &evt
 				count++
 			}
-			b.batchSize = count
 		}()
 
-		return b.waitForResults()
+		cc := make(chan int, 1)
+		cc <- count
+		return b.waitForResults(ctx, cc)
 	} else {
 		// collect chunks from the reader
 		chunks := make(chan []byte)
@@ -216,39 +228,37 @@ type publishingBatch struct {
 	outputBurndown chan int
 	dropHappened   chan bool
 	errorHappened  chan error
-	batchSize      int
 	outputFanout   int
-	opts           *PipelineOptions
+	slowWarning    time.Duration
+	slowDeadline   time.Duration
 }
 
-func newBatch(batchSize int, outputFanout int) *publishingBatch {
+func newBatch() *publishingBatch {
 	return &publishingBatch{
 		filterBurndown: make(chan int),
 		outputBurndown: make(chan int),
 		dropHappened:   make(chan bool),
 		errorHappened:  make(chan error),
-		batchSize:      batchSize,
-		outputFanout:   outputFanout,
-		opts:           nil,
+		// TODO: make these customizable
+		slowWarning:  3 * time.Second,
+		slowDeadline: 10 * time.Second,
 	}
 }
 
-func (b *publishingBatch) waitForResults() (*BatchResult, error) {
-	pendingFilter := b.batchSize
-	pendingOutput := b.batchSize * b.outputFanout
+// we don't always know how many events we're waiting for
+// because we start monitoring the batch progress before the entire batch is read in
+// that's why we need a channel to get the final count
+func (b *publishingBatch) waitForResults(ctx context.Context, counted chan int) (*BatchResult, error) {
+	log := ContextLogger(ctx)
 
-	slowBatchWarning := make(<-chan time.Time)
-	if b.opts != nil && b.opts.SlowBatchWarning > 0 {
-		slowBatchWarning = time.After(b.opts.SlowBatchWarning)
-	}
+	countFilterMarked := 0
+	countOutputMarked := 0
 
-	slowBatchDeadline := make(<-chan time.Time)
-	if b.opts != nil && b.opts.BatchTimeout > 0 {
-		slowBatchDeadline = time.After(b.opts.SlowBatchWarning)
-	}
+	slowWarning := time.After(b.slowWarning)
+	slowDeadline := time.After(b.slowDeadline)
 
 	result := &BatchResult{
-		TotalCount:   b.batchSize,
+		//TotalCount:   b.batchSize,
 		DropCount:    0,
 		ErrorCount:   0,
 		SuccessCount: 0,
@@ -257,30 +267,39 @@ func (b *publishingBatch) waitForResults() (*BatchResult, error) {
 		Start:        time.Now(), // TODO: can we set this earlier?
 	}
 
-	for pendingFilter > 0 || pendingOutput > 0 {
+	// FIXME: when to stop for loop?
+	target := -1
+	for target != countOutputMarked {
 		select {
+		case target = <-counted:
+			// good, now we know the termination condition
 		case x := <-b.filterBurndown:
-			// x should normally be 1
-			pendingFilter -= x
+			if x != 1 {
+				panic(x)
+			}
+			countFilterMarked += 1
 		case x := <-b.outputBurndown:
-			// x should normally be 1
-			pendingOutput -= x
-			// TODO: how do I increment success count? how do I know a given event was published to ALL filters?
+			if x != 1 {
+				panic(x)
+			}
+			countOutputMarked += 1
+			result.SuccessCount += 1
 		case <-b.dropHappened:
-			pendingFilter -= 1
-			// if dropped by a filter, it will never reach any of the outputs
-			pendingOutput -= b.outputFanout
+			countFilterMarked += 1
+			countOutputMarked += 1
 			result.DropCount++
 		case err := <-b.errorHappened:
 			// TODO: should we set the Ok status or not?
 			//result.Ok = false
 			result.ErrorCount += 1
 			result.Errors = append(result.Errors, err)
-		case <-slowBatchWarning:
-			slog.Warn("publishingBatch is taking longer than expected")
-		case <-slowBatchDeadline:
+		case <-slowWarning:
+			log.Warn(fmt.Sprintf("input batch still pending after %v (target=%d)", b.slowWarning, target))
+		case <-slowDeadline:
 			result.Ok = false
-			return result, fmt.Errorf("publishingBatch timed out")
+			errTxt := fmt.Sprintf("input batch failed after timeout: %v (target=%d)", b.slowDeadline, target)
+			log.Error(errTxt)
+			return result, fmt.Errorf(errTxt)
 		}
 	}
 

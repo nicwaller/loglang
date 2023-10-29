@@ -88,6 +88,8 @@ func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader i
 				log.Debug("decoderLoop timeout", "count", decoded)
 			}
 		}
+		// this close() is important!
+		close(output)
 
 	case 2, 3, 4:
 		// we should be prepared for multiple levels of framing
@@ -106,7 +108,9 @@ func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader i
 }
 
 type OutputPlugin interface {
-	// TODO: Run() needs a better Name or purpose
+	// Output interface uses function instead of channel
+	// because the function return indicates when an event has been processed
+	// and that drives end-to-end acknowledgement back to the input
 	Send(context.Context, []*Event) error
 }
 
