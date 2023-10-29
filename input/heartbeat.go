@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"fmt"
 	"github.com/nicwaller/loglang"
 	"log/slog"
 	"os"
@@ -9,8 +10,10 @@ import (
 )
 
 func Heartbeat(opts HeartbeatOptions) loglang.InputPlugin {
-	if opts.Interval < time.Second {
-		opts.Interval = time.Second
+	const minHeartrateInterval = 100 * time.Millisecond
+	if opts.Interval < minHeartrateInterval {
+		slog.Warn(fmt.Sprintf("Minimum heartbeat is %v", minHeartrateInterval))
+		opts.Interval = minHeartrateInterval
 	}
 	p := generator{opts: opts}
 	return &p

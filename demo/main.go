@@ -23,7 +23,7 @@ func main() {
 	})
 
 	p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{
-		Interval: time.Second,
+		Interval: time.Millisecond,
 		Count:    3,
 	}))
 	//p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
