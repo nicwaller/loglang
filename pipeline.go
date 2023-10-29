@@ -28,14 +28,14 @@ func NewPipeline(name string, options PipelineOptions) *Pipeline {
 
 	var p Pipeline
 
+	p.opts = options
+	p.Name = name
+
 	p.ctx = context.Background()
 	p.ctx, p.stop = context.WithCancelCause(p.ctx)
 	p.ctx = context.WithValue(p.ctx, ContextKeyPipelineName, p.GetName())
 	p.ctx = context.WithValue(p.ctx, ContextKeySchema, p.opts.Schema)
 	p.ctx = context.WithValue(p.ctx, ContextKeyPluginName, "pipeline")
-
-	p.opts = options
-	p.Name = name
 
 	p.Filter("default @timestamp", func(event *Event, inject chan<- *Event, drop func()) error {
 		// PERF: maybe don't allocate a new field each time?
