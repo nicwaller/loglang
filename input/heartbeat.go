@@ -53,7 +53,7 @@ func (p *generator) Run(ctx context.Context, sender loglang.Sender) error {
 	}
 	opts := p.opts
 	var lastDuration time.Duration
-	for count := 0; running; count++ {
+	for count := 1; running && count != p.opts.Count; count++ {
 		nextHeartbeat := time.After(opts.Interval)
 		evt := loglang.NewEvent()
 		switch schema {
