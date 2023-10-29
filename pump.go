@@ -10,23 +10,22 @@ import (
 // this function does nothing useful
 // anywhere it's used, that is surely a design error
 func Pump(ctx context.Context, stop context.CancelCauseFunc, input chan *Event, output chan *Event) {
+	// TODO: I think we need this, but also it causes a panic?
+	//defer close(output)
 nullPump:
 	for {
 		select {
 		case inEvt, more := <-input:
 			if !more {
 				stop(fmt.Errorf("nullPump saw closed channel"))
-				close(output)
 				break nullPump
 			}
 			if inEvt == nil {
 				stop(fmt.Errorf("nullPump saw nil event"))
-				close(output)
 				break nullPump
 			}
 			output <- inEvt
 		case <-ctx.Done():
-			close(output)
 			break nullPump
 		}
 	}
@@ -36,6 +35,7 @@ nullPump:
 func PumpFilterList(ctx context.Context, stop context.CancelCauseFunc,
 	input chan *Event, output chan *Event,
 	filters []NamedEntity[FilterPlugin], ack bool) {
+	// don't need to defer close(output) here because that happens in Pump()
 
 	log := ContextLogger(ctx)
 	log.Debug("preparing filter chain")
@@ -52,10 +52,10 @@ func PumpFilterList(ctx context.Context, stop context.CancelCauseFunc,
 		go PumpFilter(ctx, stop, allChannels[i], allChannels[i+1], filter, ack)
 	}
 
+	log.Info(fmt.Sprintf("set up filter chain length=%d", len(filters)))
+
 	// FIXME: don't use Pump(); avoid wasting a channel instead.
 	Pump(ctx, stop, allChannels[len(allChannels)-1], output)
-
-	log.Info(fmt.Sprintf("set up %d filters", len(filters)))
 }
 
 func PumpFilter(ctx context.Context, stop context.CancelCauseFunc,
@@ -64,18 +64,17 @@ func PumpFilter(ctx context.Context, stop context.CancelCauseFunc,
 	log := ContextLogger(ctx)
 	filterFunc := filter.Value
 	log.Debug("starting filter pump")
+	defer close(output)
 filterPump:
 	for {
 		select {
 		case event, more := <-input:
 			if !more {
 				stop(fmt.Errorf("filterPump saw closed channel"))
-				close(output)
 				break filterPump
 			}
 			if event == nil {
 				stop(fmt.Errorf("filterPump saw nil event"))
-				close(output)
 				break filterPump
 			}
 			dropped := false
@@ -113,7 +112,6 @@ filterPump:
 			// send it
 			output <- event
 		case <-ctx.Done():
-			close(output)
 			break filterPump
 		}
 	}
@@ -150,6 +148,11 @@ functionPump:
 
 // intended to be run as a goroutine
 func PumpFanOut(ctx context.Context, stop context.CancelCauseFunc, input <-chan *Event, outputs []chan *Event) {
+	defer func() {
+		for i := range outputs {
+			close(outputs[i])
+		}
+	}()
 	log := ContextLogger(ctx)
 	log.Debug("starting pump fanOut")
 fanOut:
