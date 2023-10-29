@@ -2,17 +2,15 @@ package output
 
 import (
 	"context"
-	"fmt"
 	"github.com/nicwaller/loglang"
-	"github.com/nicwaller/loglang/codec"
 	"log/slog"
 	"os"
+	"strconv"
+	"sync"
+	"time"
 )
 
 func StdOut(opts StdoutOptions) loglang.OutputPlugin {
-	if opts.Codec == nil {
-		opts.Codec = codec.Kv()
-	}
 	return &stdOut{opts: opts}
 }
 
@@ -21,34 +19,62 @@ type stdOut struct {
 }
 
 type StdoutOptions struct {
-	Codec loglang.CodecPlugin
 }
 
-func (p *stdOut) Send(_ context.Context, events []*loglang.Event) error {
-	for _, event := range events {
-		if err := p.sendOne(event); err != nil {
-			return err
+func (p *stdOut) Send(ctx context.Context, events []*loglang.Event, cp loglang.CodecPlugin, fp loglang.FramingPlugin) error {
+	ctx = context.WithValue(ctx, loglang.ContextKeyPluginType, "stdout")
+	log := loglang.ContextLogger(ctx)
+
+	encodedEvents := make(chan []byte)
+	framedEvents := make(chan []byte)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// encode each event and dump it into a framing channel
+	go func() {
+		for _, evt := range events {
+			dat, err := cp.Encode(*evt)
+			if err != nil {
+				slog.Error("error", "error", err)
+				close(encodedEvents)
+			}
+			encodedEvents <- dat
 		}
-	}
-	return nil
-}
+		close(encodedEvents)
+		wg.Done()
+	}()
 
-func (p *stdOut) sendOne(event *loglang.Event) error {
-	if event == nil {
-		slog.Error("output[stdout].sendOne() saw nil event")
-		return fmt.Errorf("nil event")
-	}
-	dat, err := p.opts.Codec.Encode(*event)
-	if err != nil {
-		return err
-	}
-	// PERF: might want to use buffered output to go faster
-	// but be careful about flushing the buffer before exit
-	_, err = os.Stdout.Write(dat)
-	_, err = os.Stdout.Write([]byte("\n"))
-	if err != nil {
-		return err
-	} else {
-		return nil
-	}
+	// run the specified framing
+	go func() {
+		fp.Frameup(ctx, encodedEvents, framedEvents)
+		wg.Done()
+	}()
+
+	// write the framing results to stdout
+	go func() {
+	outLoop:
+		for {
+			select {
+			case frame, more := <-framedEvents:
+				if !more {
+					log.Debug("exiting loop", "more", more, "remain", len(frame))
+					break outLoop
+				}
+				write, err := os.Stdout.Write(frame)
+				if err != nil {
+					log.Error(err.Error())
+				} else {
+					log.Info(strconv.Itoa(write))
+				}
+			case <-time.After(3 * time.Second):
+				log.Warn("stdout stalled; make sure that framing plugin is closing channel")
+			}
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	return nil
 }

@@ -63,10 +63,16 @@ type Pipeline struct {
 	Name    string // TODO: remove this
 	inputs  []NamedEntity[inputDetail]
 	filters []NamedEntity[FilterPlugin]
-	outputs []NamedEntity[OutputPlugin]
+	outputs []NamedEntity[OutputConfig]
 	opts    PipelineOptions
 	ctx     context.Context
 	stop    context.CancelCauseFunc
+}
+
+type OutputConfig struct {
+	output  OutputPlugin
+	framing FramingPlugin
+	codec   CodecPlugin
 }
 
 type PipelineOptions struct {
@@ -123,7 +129,10 @@ func (p *Pipeline) runInputs(combinedInputs chan *Event) {
 
 	for _, entity := range p.inputs {
 		pluginContext := context.WithValue(p.ctx, ContextKeyPluginName, entity.Name)
-		go p.runInput(pluginContext, p.stop, entity, combinedInputs)
+		go func() {
+			p.runInput(pluginContext, p.stop, entity, combinedInputs)
+			allInputsComplete.Done()
+		}()
 		allInputsComplete.Add(1)
 	}
 
@@ -165,15 +174,17 @@ func (p *Pipeline) runOutputs(events chan *Event) {
 	var countOutputs uint32 = uint32(len(p.outputs))
 
 	for i, namedOutput := range p.outputs {
+		pluginCtx := context.WithValue(p.ctx, ContextKeyPluginName, namedOutput.Name)
+		// TODO: create a context for the output plugin with the plugin name
 		log := ContextLogger(p.ctx)
 
-		output := namedOutput.Value
+		outputCfg := namedOutput.Value
 		soloChan := outputChannels[i]
 
 		log.Info("starting output")
-		go PumpToFunction(p.ctx, p.stop, soloChan, func(event *Event) error {
+		go PumpToFunction(pluginCtx, p.stop, soloChan, func(event *Event) error {
 			// TODO: this is the opportunity to buffer and send several events at once
-			err := output.Send(p.ctx, []*Event{event})
+			err := outputCfg.output.Send(pluginCtx, []*Event{event}, outputCfg.codec, outputCfg.framing)
 			// E2E handling
 			if event.batch != nil {
 				if err != nil {
@@ -211,10 +222,15 @@ func (p *Pipeline) Filter(name string, f FilterPlugin) {
 	})
 }
 
-func (p *Pipeline) Output(name string, f OutputPlugin) {
+// TODO: outputs should also have a filter chain
+func (p *Pipeline) Output(name string, op OutputPlugin, cp CodecPlugin, fp FramingPlugin) {
 	// TODO: this is where we associate a Name with an output
-	p.outputs = append(p.outputs, NamedEntity[OutputPlugin]{
-		Name:  name,
-		Value: f,
+	p.outputs = append(p.outputs, NamedEntity[OutputConfig]{
+		Name: name,
+		Value: OutputConfig{
+			output:  op,
+			codec:   cp,
+			framing: fp,
+		},
 	})
 }

@@ -178,17 +178,20 @@ fanOut:
 }
 
 // intended to be run as a goroutine
-func PumpToWriter(ctx context.Context, stop context.CancelCauseFunc, input <-chan []byte, output io.Writer) {
+func PumpToWriter(ctx context.Context, stop context.CancelCauseFunc, input <-chan []byte, output io.WriteCloser) {
 	log := ContextLogger(ctx)
-	log.Debug("started pump to writer")
+	log.Debug("started pumping data to writer")
+	defer output.Close()
 writeLoop:
 	for {
 		select {
+		case <-time.After(15 * time.Second):
+			log.Debug("stalled?")
 		case <-ctx.Done():
 			break writeLoop
 		case chunk, more := <-input:
-			//log.Debug("channel pump got a chunk")
 			if !more {
+				log.Debug("channel pump saw closed stream")
 				stop(fmt.Errorf("input channel closed"))
 				break writeLoop
 			}
@@ -199,46 +202,62 @@ writeLoop:
 			}
 		}
 	}
-	log.Debug("stopped pumping input", "cause", context.Cause(ctx))
+	log.Debug("stopped pumping data to writer", "cause", context.Cause(ctx))
 }
 
 // intended to be run as a goroutine
 func PumpFromReader(ctx context.Context, stop context.CancelCauseFunc, input io.Reader, output chan<- []byte) {
+	defer close(output)
 	log := ContextLogger(ctx)
 	log.Debug("started pump from reader")
 
 	buf := make([]byte, MaxFrameSize)
 	count := 0
+
+	chunks := make(chan []byte)
+	go func() {
+		// this is a hacky workaround for input.Read() being blocking
+		// and not being able to pick up an EOF
+		// and this function never returning
+		for {
+			// input.Read() blocks forever
+			bytesRead, err := input.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					// EOF is very normal and expected
+					stop(err)
+				} else {
+					stop(fmt.Errorf("PumpFromReader failed: %w", err))
+				}
+				return
+			}
+			if bytesRead == MaxFrameSize {
+				log.Warn("reached MaxFrameSize; cannot guarantee frame integrity")
+			}
+			// why copy the frame? to avoid races with slices referencing the buffer
+			frameCopy := make([]byte, bytesRead)
+			copy(frameCopy, buf)
+			chunks <- frameCopy
+		}
+		// this probably leaks a goroutine.
+		// can we recover without shutting down the whole process?
+	}()
 readLoop:
 	for {
 		select {
 		case <-ctx.Done():
 			log.Debug("halting PumpFromReader.readloop", "cause", context.Cause(ctx))
 			break readLoop
-		default:
-			bytesRead, err := input.Read(buf)
-			//log.Debug("Reader pump got bytes")
-			if err != nil {
-				if err.Error() == "EOF" {
-					// FIXME: this is a horrible hack to prevent early exit and loss of in-flight frames
-					time.Sleep(25 * time.Millisecond)
-
-					// EOF is very normal and expected
-					stop(err)
-				} else {
-					stop(fmt.Errorf("PumpFromReader failed: %w", err))
-				}
+		case <-time.After(100 * time.Millisecond):
+			// todo much longer timeout
+			log.Debug("reader timed out")
+			break readLoop
+		case chunk, more := <-chunks:
+			if !more {
+				stop(fmt.Errorf("end of chunks"))
 				break readLoop
 			}
-			if bytesRead == MaxFrameSize {
-				log.Warn("reached MaxFrameSize; cannot guarantee frame integrity")
-				//stop(maxErr)
-				//break readLoop
-			}
-			// why copy the frame? to avoid races with slices referencing the buffer
-			frameCopy := make([]byte, bytesRead)
-			copy(frameCopy, buf)
-			output <- frameCopy
+			output <- chunk
 			count++
 		}
 	}

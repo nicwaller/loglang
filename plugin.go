@@ -111,7 +111,7 @@ type OutputPlugin interface {
 	// Output interface uses function instead of channel
 	// because the function return indicates when an event has been processed
 	// and that drives end-to-end acknowledgement back to the input
-	Send(context.Context, []*Event) error
+	Send(context.Context, []*Event, CodecPlugin, FramingPlugin) error
 }
 
 type FilterPlugin func(event *Event, inject chan<- *Event, drop func()) error

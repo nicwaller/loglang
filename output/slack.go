@@ -59,7 +59,7 @@ type SlackOptions struct {
 	DetailFields    bool
 }
 
-func (p *slackOutput) Send(ctx context.Context, events []*loglang.Event) error {
+func (p *slackOutput) Send(ctx context.Context, events []*loglang.Event, cp loglang.CodecPlugin, fp loglang.FramingPlugin) error {
 	// TODO: validate token immediately
 	// TODO: outputs should use context and process more than one event at a time
 

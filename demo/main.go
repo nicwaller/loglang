@@ -4,6 +4,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/nicwaller/loglang"
 	"github.com/nicwaller/loglang/codec"
+	"github.com/nicwaller/loglang/framing"
 	"github.com/nicwaller/loglang/input"
 	"github.com/nicwaller/loglang/output"
 	"log/slog"
@@ -21,7 +22,10 @@ func main() {
 		Schema:            loglang.SchemaFlat,
 	})
 
-	//p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: 1 * time.Second}))
+	p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{
+		Interval: time.Second,
+		Count:    3,
+	}))
 	//p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
 	//p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{
 	//	Codec: codec.Json(),
@@ -34,10 +38,12 @@ func main() {
 	//	//Schema:  loglang.SchemaLogstashECS,
 	//}))
 
-	p.Input("stdin", input.Stdin())
-	p.Output("stdout", output.StdOut(output.StdoutOptions{
-		Codec: codec.Json(),
-	}))
+	//p.Input("stdin", input.Stdin())
+	p.Output("out1",
+		output.StdOut(output.StdoutOptions{}),
+		codec.Json(),
+		framing.Gzip(),
+	)
 
 	//p.Output("slack", output.Slack(output.SlackOptions{
 	//	BotToken:        os.Getenv("BOT_TOKEN"),
