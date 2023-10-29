@@ -161,7 +161,7 @@ func (p *Pipeline) runInput(ctx context.Context, stop context.CancelCauseFunc, i
 }
 
 func (p *Pipeline) runOutputs(events chan *Event) {
-	log := slog.With(string(ContextKeyPipelineName), p.ctx.Value(ContextKeyPipelineName))
+	log := ContextLogger(p.ctx)
 	log.Debug("starting outputs")
 
 	// set up an output channel for each output
