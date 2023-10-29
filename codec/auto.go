@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/nicwaller/loglang"
 	"regexp"
@@ -18,13 +19,15 @@ func (p *autoCodec) Encode(evt loglang.Event) ([]byte, error) {
 }
 
 func (p *autoCodec) Decode(dat []byte) (loglang.Event, error) {
+	const magicNumberGzip = 0x1f8b
+	const magicNumberChunkedGelf = 0x1e0f
+
 	if dat[0] == '{' && dat[len(dat)-1] == '}' {
 		var c jsonCodec
 		return c.Decode(dat)
-	} else if dat[0] == 0x1f && dat[1] == 0x8b {
-		// detected magic bytes for gzip
+	} else if magicNumberGzip == binary.BigEndian.Uint16(dat) {
 		return loglang.Event{}, fmt.Errorf("autoCodec doesn't support gzip; use framing for that")
-	} else if dat[0] == 0x1e && dat[1] == 0x0f {
+	} else if magicNumberChunkedGelf == binary.BigEndian.Uint16(dat) {
 		// detected magic bytes for chunked GELF
 		return loglang.Event{}, fmt.Errorf("autoCodec doesn't support chunked GELF; use framing for that")
 	} else if dat[0] == '-' && dat[1] == '-' && dat[2] == '-' {

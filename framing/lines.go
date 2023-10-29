@@ -23,7 +23,7 @@ func (p *lines) Extract(ctx context.Context, input <-chan []byte, output chan<- 
 	log := loglang.ContextLogger(ctx)
 
 	scannable, writeInputFrames := io.Pipe()
-	go loglang.PumpChannel(ctx, stop, input, writeInputFrames)
+	go loglang.PumpToWriter(ctx, stop, input, writeInputFrames)
 
 	streamScanner := bufio.NewScanner(scannable)
 	log.Info("started scanLoop")

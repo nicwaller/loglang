@@ -45,7 +45,7 @@ func (p *BaseInputPlugin) Extract(ctx context.Context, template *Event, reader i
 	case 1:
 		// collect chunks from the reader
 		chunks := make(chan []byte)
-		go PumpReader(ctx, stop, reader, chunks)
+		go PumpFromReader(ctx, stop, reader, chunks)
 
 		// the framing stage will normalize those into whole frames
 		stage := p.Framing[0]
@@ -115,7 +115,8 @@ type FilterPlugin func(event *Event, inject chan<- *Event, drop func()) error
 type CodecPlugin interface {
 	Encode(Event) ([]byte, error)
 	Decode([]byte) (Event, error)
-	// FIXME: change to *Event
+	// An Event struct is only 16 bytes in memory
+	// so pointers aren't needed in this interface
 }
 
 type FramingPlugin interface {
@@ -123,7 +124,6 @@ type FramingPlugin interface {
 	// they had problems if the frame size exceeded the buffer size.
 	Extract(ctx context.Context, input <-chan []byte, output chan<- []byte) error
 	Frameup(ctx context.Context, input <-chan []byte, output chan<- []byte) error
-	// TODO: wish I had better names for these functions
 }
 
 const MaxFrameSize = 65536

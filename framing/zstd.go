@@ -26,8 +26,8 @@ func (p *zstdFraming) Extract(ctx context.Context, input <-chan []byte, output c
 	}
 
 	// io.Pipe MUST be paired with a goroutine to avoid blocking
-	go loglang.PumpChannel(ctx, stop, input, pipeWriter)
-	loglang.PumpReader(ctx, stop, subreader, output)
+	go loglang.PumpToWriter(ctx, stop, input, pipeWriter)
+	loglang.PumpFromReader(ctx, stop, subreader, output)
 
 	return
 }
@@ -44,8 +44,8 @@ func (p *zstdFraming) Frameup(ctx context.Context, input <-chan []byte, output c
 	}
 
 	// io.Pipe MUST be paired with a goroutine to avoid blocking
-	go loglang.PumpChannel(ctx, stop, input, writePlain)
-	loglang.PumpReader(ctx, stop, readCompressed, output)
+	go loglang.PumpToWriter(ctx, stop, input, writePlain)
+	loglang.PumpFromReader(ctx, stop, readCompressed, output)
 
 	return
 }

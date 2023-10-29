@@ -21,11 +21,6 @@ func main() {
 		Schema:            loglang.SchemaFlat,
 	})
 
-	p.OnCompletion = func() {
-		slog.Info("Goodbye")
-		time.Sleep(time.Second)
-	}
-
 	//p.Input("heartbeat", input.Heartbeat(input.HeartbeatOptions{Interval: 1 * time.Second}))
 	//p.Input("tcp/9998", input.NewTcpListener(9998, input.TcpListenerOptions{}))
 	//p.Input("udp/9999", input.UdpListener(9999, input.UdpListenerOptions{
@@ -67,7 +62,8 @@ func main() {
 	if err := p.Run(); err != nil {
 		slog.Error(err.Error())
 	}
-	slog.Info("Exiting")
+
+	slog.Info("Goodbye")
 }
 
 func setupLogging() {

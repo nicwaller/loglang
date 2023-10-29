@@ -147,7 +147,7 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 
 		// collect chunks from the reader
 		chunks := make(chan []byte)
-		go PumpReader(ctx, stop, byteStream, chunks)
+		go PumpFromReader(ctx, stop, byteStream, chunks)
 
 		// the framing stage will normalize those into whole frames
 		stage := f
@@ -179,7 +179,7 @@ func (s *SimpleSender) SendWithFramingCodec(ctx context.Context, template *Event
 	} else {
 		// collect chunks from the reader
 		chunks := make(chan []byte)
-		go PumpReader(ctx, stop, byteStream, chunks)
+		go PumpFromReader(ctx, stop, byteStream, chunks)
 
 		// the framing stage will normalize those into whole frames
 		stage := f

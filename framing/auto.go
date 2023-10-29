@@ -28,7 +28,7 @@ func (p *autoFraming) Extract(ctx context.Context, rawInput <-chan []byte, outpu
 	const peekSize = 240
 
 	pipeReader, pipeWriter := io.Pipe()
-	go loglang.PumpChannel(ctx, stop, rawInput, pipeWriter)
+	go loglang.PumpToWriter(ctx, stop, rawInput, pipeWriter)
 
 	// TODO: try to make a decision with every packet of data that arrives?
 	input := bufio.NewReaderSize(pipeReader, peekSize)
@@ -89,12 +89,12 @@ func (p *autoFraming) Extract(ctx context.Context, rawInput <-chan []byte, outpu
 		if exErr != nil {
 			return
 		}
-		loglang.PumpReader(ctx, stop, subreader, output)
+		loglang.PumpFromReader(ctx, stop, subreader, output)
 		return
 	case bzipFramingMode:
 		var subreader io.Reader
 		subreader = bzip2.NewReader(input)
-		loglang.PumpReader(ctx, stop, subreader, output)
+		loglang.PumpFromReader(ctx, stop, subreader, output)
 		return
 	case zstdFramingMode:
 		var subreader io.Reader
@@ -102,13 +102,13 @@ func (p *autoFraming) Extract(ctx context.Context, rawInput <-chan []byte, outpu
 		if exErr != nil {
 			return
 		}
-		loglang.PumpReader(ctx, stop, subreader, output)
+		loglang.PumpFromReader(ctx, stop, subreader, output)
 		return
 	case wholeFramingMode:
-		loglang.PumpReader(ctx, stop, input, output)
+		loglang.PumpFromReader(ctx, stop, input, output)
 		return
 	default:
-		loglang.PumpReader(ctx, stop, input, output)
+		loglang.PumpFromReader(ctx, stop, input, output)
 		return
 	}
 

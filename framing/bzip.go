@@ -22,8 +22,8 @@ func (p *bzipFraming) Extract(ctx context.Context, input <-chan []byte, output c
 	pipeReader, pipeWriter := io.Pipe()
 	subreader := bzip2.NewReader(pipeReader)
 	// io.Pipe MUST be paired with a goroutine to avoid blocking
-	go loglang.PumpReader(ctx, haltExtraction, subreader, output)
-	loglang.PumpChannel(ctx, haltExtraction, input, pipeWriter)
+	go loglang.PumpFromReader(ctx, haltExtraction, subreader, output)
+	loglang.PumpToWriter(ctx, haltExtraction, input, pipeWriter)
 
 	return
 }
