@@ -62,5 +62,6 @@ framingLoop:
 			output <- frameLF
 		}
 	}
+	close(output)
 	return nil
 }
